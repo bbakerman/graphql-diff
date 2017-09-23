@@ -5,14 +5,17 @@ import com.graphql.diff.reporting.PrintingReporter;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 public class CapturingReporter extends PrintingReporter {
     private final List<DifferenceEvent> events = new ArrayList<>();
+    private final List<DifferenceEvent> errors = new ArrayList<>();
 
     @Override
     public void report(DifferenceEvent differenceEvent) {
         events.add(differenceEvent);
+        if (differenceEvent.getLevel() == DifferenceEvent.Level.ERROR) {
+            errors.add(differenceEvent);
+        }
         super.report(differenceEvent);
     }
 
@@ -26,6 +29,6 @@ public class CapturingReporter extends PrintingReporter {
     }
 
     public List<DifferenceEvent> getErrors() {
-        return events.stream().filter(e -> e.getLevel().equals(DifferenceEvent.Level.ERROR)).collect(Collectors.toList());
+        return errors;
     }
 }

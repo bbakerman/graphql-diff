@@ -23,7 +23,8 @@ type Mutation {
 
 input Questor {
     beingID : ID
-    #queryTarget : String
+    queryTarget : Int
+    newMandatoryField : String!
 }
 
 scalar CustomScalar
@@ -53,7 +54,7 @@ type Istari implements Being {
     invitedBy(id : ID) : Being
     colour : String
     temperament : Temperament!
-    
+
 }
 
 type Deity implements Being {

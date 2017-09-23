@@ -4,16 +4,22 @@ schema {
 }
 
 type Query {
-    being(id : ID, type : String) : Being
-    beings(type : String) : [Being]
+    #being(id : ID, type : String) : Being
+    being(id : ID, type : String, newArg : String!) : Being
 
-    wizards : [Istari]
+    #beings(type : String) : [Being]
+    beings(type : String) : Being
+
+    #wizards : [Istari]
+    wizards : [Istari!]
     gods : [Ainur]
     deities : [Deity]
 
-    allCharacters : [Character!] @deprecated(reason: "no longer supported")
+    #allCharacters : [Character!] @deprecated(reason: "no longer supported")
+    allCharacters : [Character!]
 
-    customScalar : CustomScalar
+    #customScalar : CustomScalar
+    customScalar : [CustomScalar]!
 }
 
 type Mutation {
@@ -23,7 +29,7 @@ type Mutation {
 
 input Questor {
     beingID : ID
-    #queryTarget : String
+    queryTarget : String
 }
 
 scalar CustomScalar
@@ -53,7 +59,7 @@ type Istari implements Being {
     invitedBy(id : ID) : Being
     colour : String
     temperament : Temperament!
-    
+
 }
 
 type Deity implements Being {

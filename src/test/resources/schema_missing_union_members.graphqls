@@ -18,6 +18,7 @@ type Query {
 
 type Mutation {
     being(questor : Questor) : Query
+    sword(bearer : Questor, name : String, alloy : String, temperament : Temperament) : String
 }
 
 input Questor {

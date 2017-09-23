@@ -1,13 +1,5 @@
 package com.graphql.diff.reporting;
 
-import graphql.language.EnumTypeDefinition;
-import graphql.language.InputObjectTypeDefinition;
-import graphql.language.InterfaceTypeDefinition;
-import graphql.language.ObjectTypeDefinition;
-import graphql.language.ScalarTypeDefinition;
-import graphql.language.TypeDefinition;
-import graphql.language.UnionTypeDefinition;
-
 public class DifferenceEvent {
 
     public enum Level {
@@ -18,44 +10,15 @@ public class DifferenceEvent {
         MISSING, STRICTER, INVALID
     }
 
-    public enum TypeOfType {
-
-        Operation, Object, Interface, Union, Enum, Scalar, InputObject, Unknown;
-
-        public static TypeOfType getTypeOfType(TypeDefinition def) {
-            if (def instanceof ObjectTypeDefinition) {
-                return Object;
-            }
-            if (def instanceof InterfaceTypeDefinition) {
-                return Interface;
-            }
-            if (def instanceof UnionTypeDefinition) {
-                return Union;
-            }
-            if (def instanceof ScalarTypeDefinition) {
-                return Scalar;
-            }
-            if (def instanceof EnumTypeDefinition) {
-                return Enum;
-            }
-            if (def instanceof InputObjectTypeDefinition) {
-                return InputObject;
-            }
-            return Unknown;
-        }
-
-
-    }
-
 
     private final Level level;
     private final Category category;
     private final String typeName;
     private final String fieldName;
-    private final TypeOfType typeOfType;
+    private final TypeKind typeOfType;
     private final String reasonMsg;
 
-    DifferenceEvent(Level level, Category category, String typeName, String fieldName, TypeOfType typeOfType, String reasonMsg) {
+    DifferenceEvent(Level level, Category category, String typeName, String fieldName, TypeKind typeOfType, String reasonMsg) {
         this.level = level;
         this.category = category;
         this.typeName = typeName;
@@ -68,7 +31,7 @@ public class DifferenceEvent {
         return typeName;
     }
 
-    public TypeOfType getTypeOfType() {
+    public TypeKind getTypeOfType() {
         return typeOfType;
     }
 
@@ -91,12 +54,12 @@ public class DifferenceEvent {
     @Override
     public String toString() {
         return "DifferenceEvent{" +
-                "level=" + level +
+                " reasonMsg='" + reasonMsg + '\'' +
+                ", level=" + level +
                 ", category=" + category +
                 ", typeName='" + typeName + '\'' +
-                ", typeOfType=" + typeOfType +
+                ", typeKind=" + typeOfType +
                 ", fieldName=" + fieldName +
-                ", reasonMsg='" + reasonMsg + '\'' +
                 '}';
     }
 
@@ -118,7 +81,7 @@ public class DifferenceEvent {
         Category category;
         Level level;
         String typeName;
-        TypeOfType typeOfType;
+        TypeKind typeOfType;
         String reasonMsg;
         String fieldName;
 
@@ -138,7 +101,7 @@ public class DifferenceEvent {
             return this;
         }
 
-        public Builder typeOfType(TypeOfType typeOfType) {
+        public Builder typeKind(TypeKind typeOfType) {
             this.typeOfType = typeOfType;
             return this;
         }

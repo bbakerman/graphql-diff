@@ -1,6 +1,6 @@
 package com.graphql.diff
 
-import com.graphql.diff.reporting.DifferenceEvent
+import com.graphql.diff.reporting.TypeKind
 import graphql.language.Argument
 import graphql.language.Directive
 import graphql.language.IntValue
@@ -16,8 +16,8 @@ import spock.lang.Specification
 import static com.graphql.diff.reporting.DifferenceEvent.Category.INVALID
 import static com.graphql.diff.reporting.DifferenceEvent.Category.MISSING
 import static com.graphql.diff.reporting.DifferenceEvent.Category.STRICTER
-import static com.graphql.diff.reporting.DifferenceEvent.TypeOfType.Interface
-import static com.graphql.diff.reporting.DifferenceEvent.TypeOfType.Union
+import static com.graphql.diff.reporting.TypeKind.Interface
+import static com.graphql.diff.reporting.TypeKind.Union
 
 class SchemaDiffTest extends Specification {
     private CapturingReporter reporter
@@ -157,11 +157,11 @@ class SchemaDiffTest extends Specification {
 
         expect:
         reporter.errorCount == 2 // 2 fields removed
-        reporter.getErrors()[0].category == MISSING
-        reporter.getErrors()[0].typeOfType == Interface
+        reporter.errors[0].category == MISSING
+        reporter.errors[0].typeOfType == Interface
 
-        reporter.getErrors()[1].category == MISSING
-        reporter.getErrors()[1].typeOfType == Interface
+        reporter.errors[1].category == MISSING
+        reporter.errors[1].typeOfType == Interface
     }
 
     def "missing members on union"() {
@@ -172,8 +172,8 @@ class SchemaDiffTest extends Specification {
 
         expect:
         reporter.errorCount == 1 // 1 member removed
-        reporter.getErrors()[0].category == MISSING
-        reporter.getErrors()[0].typeOfType == Union
+        reporter.errors[0].category == MISSING
+        reporter.errors[0].typeOfType == Union
 
     }
 
@@ -185,13 +185,13 @@ class SchemaDiffTest extends Specification {
 
         expect:
         reporter.errorCount == 2 // 2 fields removed
-        reporter.getErrors()[0].category == MISSING
-        reporter.getErrors()[0].typeOfType == DifferenceEvent.TypeOfType.Object
-        reporter.getErrors()[0].fieldName == 'colour'
+        reporter.errors[0].category == MISSING
+        reporter.errors[0].typeOfType == TypeKind.Object
+        reporter.errors[0].fieldName == 'colour'
 
-        reporter.getErrors()[1].category == MISSING
-        reporter.getErrors()[1].typeOfType == DifferenceEvent.TypeOfType.Object
-        reporter.getErrors()[1].fieldName == 'temperament'
+        reporter.errors[1].category == MISSING
+        reporter.errors[1].typeOfType == TypeKind.Object
+        reporter.errors[1].fieldName == 'temperament'
 
     }
 
@@ -203,9 +203,9 @@ class SchemaDiffTest extends Specification {
 
         expect:
         reporter.errorCount == 1
-        reporter.getErrors()[0].category == MISSING
-        reporter.getErrors()[0].typeOfType == DifferenceEvent.TypeOfType.Operation
-        reporter.getErrors()[0].fieldName == 'mutation'
+        reporter.errors[0].category == MISSING
+        reporter.errors[0].typeOfType == TypeKind.Operation
+        reporter.errors[0].fieldName == 'mutation'
 
     }
 
@@ -217,9 +217,91 @@ class SchemaDiffTest extends Specification {
 
         expect:
         reporter.errorCount == 1
-        reporter.getErrors()[0].category == MISSING
-        reporter.getErrors()[0].typeOfType == DifferenceEvent.TypeOfType.InputObject
-        reporter.getErrors()[0].fieldName == 'queryTarget'
+        reporter.errors[0].category == MISSING
+        reporter.errors[0].typeOfType == TypeKind.InputObject
+        reporter.errors[0].fieldName == 'queryTarget'
+
+    }
+
+    def "changed input object field types"() {
+        DiffSet diffSet = diffSet("schema_changed_input_object_fields.graphqls")
+
+        def diff = new SchemaDiff(reporter)
+        diff.diffSchema(diffSet)
+
+        expect:
+        reporter.errorCount == 2
+        reporter.errors[0].category == INVALID
+        reporter.errors[0].typeName == 'Questor'
+        reporter.errors[0].typeOfType == TypeKind.InputObject
+        reporter.errors[0].fieldName == 'queryTarget'
+
+        reporter.errors[1].category == STRICTER
+        reporter.errors[1].typeName == 'Questor'
+        reporter.errors[1].typeOfType == TypeKind.InputObject
+        reporter.errors[1].fieldName == 'newMandatoryField'
+
+    }
+
+    def "missing object field args"() {
+        DiffSet diffSet = diffSet("schema_missing_field_arguments.graphqls")
+
+        def diff = new SchemaDiff(reporter)
+        diff.diffSchema(diffSet)
+
+        expect:
+        reporter.errorCount == 1
+        reporter.errors[0].category == MISSING
+        reporter.errors[0].typeOfType == TypeKind.Object
+        reporter.errors[0].fieldName == 'sword'
+
+    }
+
+    def "changed object field args"() {
+        DiffSet diffSet = diffSet("schema_changed_field_arguments.graphqls")
+
+        def diff = new SchemaDiff(reporter)
+        diff.diffSchema(diffSet)
+
+        expect:
+        reporter.errorCount == 2
+        reporter.errors[0].category == INVALID
+        reporter.errors[0].typeOfType == TypeKind.Object
+        reporter.errors[0].fieldName == 'sword'
+
+        reporter.errors[1].category == INVALID
+        reporter.errors[1].typeOfType == TypeKind.Object
+        reporter.errors[1].fieldName == 'sword'
+
+    }
+
+    def "changed type on object"() {
+        DiffSet diffSet = diffSet("schema_changed_object_fields.graphqls")
+
+        def diff = new SchemaDiff(reporter)
+        diff.diffSchema(diffSet)
+
+        expect:
+        reporter.errorCount == 4
+        reporter.errors[0].category == STRICTER
+        reporter.errors[0].typeName == 'Query'
+        reporter.errors[0].typeOfType == TypeKind.Object
+        reporter.errors[0].fieldName == 'being'
+
+        reporter.errors[1].category == INVALID
+        reporter.errors[1].typeName == 'Query'
+        reporter.errors[1].typeOfType == TypeKind.Object
+        reporter.errors[1].fieldName == 'beings'
+
+        reporter.errors[2].category == STRICTER
+        reporter.errors[2].typeName == 'Query'
+        reporter.errors[2].typeOfType == TypeKind.Object
+        reporter.errors[2].fieldName == 'customScalar'
+
+        reporter.errors[3].category == STRICTER
+        reporter.errors[3].typeName == 'Query'
+        reporter.errors[3].typeOfType == TypeKind.Object
+        reporter.errors[3].fieldName == 'wizards'
 
     }
 

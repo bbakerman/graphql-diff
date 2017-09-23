@@ -18,12 +18,12 @@ type Query {
 
 type Mutation {
     being(questor : Questor) : Query
-    sword(bearer : Questor, name : String, alloy : String, temperament : Temperament) : String
+    sword(bearer : Questor, name : String, alloy : String) : String
 }
 
 input Questor {
     beingID : ID
-    #queryTarget : String
+    queryTarget : String
 }
 
 scalar CustomScalar
@@ -53,7 +53,7 @@ type Istari implements Being {
     invitedBy(id : ID) : Being
     colour : String
     temperament : Temperament!
-    
+
 }
 
 type Deity implements Being {

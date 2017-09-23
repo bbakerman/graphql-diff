@@ -1,8 +1,8 @@
 package com.graphql.diff;
 
 import com.graphql.diff.reporting.DifferenceEvent;
-import com.graphql.diff.reporting.DifferenceEvent.TypeOfType;
 import com.graphql.diff.reporting.DifferenceReporter;
+import com.graphql.diff.reporting.TypeKind;
 import com.graphql.diff.util.TypeInfo;
 import graphql.introspection.IntrospectionResultToSchema;
 import graphql.language.Argument;
@@ -170,7 +170,7 @@ public class SchemaDiff {
                     .category(MISSING)
                     .typeName(capitalize(opName))
                     .fieldName(opName)
-                    .typeOfType(TypeOfType.Operation)
+                    .typeKind(TypeKind.Operation)
                     .reasonMsg("The new API no longer has the operation '%s'", opName)
                     .build());
             return;
@@ -216,7 +216,7 @@ public class SchemaDiff {
 
         differenceReporter.report(newInfo()
                 .typeName(typeName)
-                .typeOfType(getTypeOfType(left))
+                .typeKind(TypeKind.getTypeKind(left))
                 .reasonMsg("Examining type '%s' ...", typeName)
                 .build());
 
@@ -224,7 +224,7 @@ public class SchemaDiff {
             differenceReporter.report(apiBreakage()
                     .category(MISSING)
                     .typeName(typeName)
-                    .typeOfType(getTypeOfType(left))
+                    .typeKind(TypeKind.getTypeKind(left))
                     .reasonMsg("The new API does not have a type called '%s'", typeName)
                     .build());
             callContext.exitType();
@@ -235,8 +235,8 @@ public class SchemaDiff {
             differenceReporter.report(apiBreakage()
                     .category(INVALID)
                     .typeName(typeName)
-                    .typeOfType(getTypeOfType(left))
-                    .reasonMsg("The new API has changed '%s' from a '%s' to a '%s'", typeName, getTypeOfType(left), getTypeOfType(right))
+                    .typeKind(TypeKind.getTypeKind(left))
+                    .reasonMsg("The new API has changed '%s' from a '%s' to a '%s'", typeName, TypeKind.getTypeKind(left), TypeKind.getTypeKind(right))
                     .build());
             callContext.exitType();
             return;
@@ -317,7 +317,7 @@ public class SchemaDiff {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
                         .typeName(left.getName())
-                        .typeOfType(getTypeOfType(left))
+                        .typeKind(TypeKind.getTypeKind(left))
                         .reasonMsg("The new API does not contain union member type '%s'", leftMemberTypeName)
                         .build());
             }
@@ -345,7 +345,7 @@ public class SchemaDiff {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
                         .typeName(left.getName())
-                        .typeOfType(getTypeOfType(left))
+                        .typeKind(TypeKind.getTypeKind(left))
                         .fieldName(leftField.getName())
                         .reasonMsg("The new API is missing an input field '%s'", leftField.getName())
                         .build());
@@ -355,7 +355,7 @@ public class SchemaDiff {
                     differenceReporter.report(apiBreakage()
                             .category(category)
                             .typeName(left.getName())
-                            .typeOfType(getTypeOfType(left))
+                            .typeKind(TypeKind.getTypeKind(left))
                             .fieldName(leftField.getName())
                             .reasonMsg("The new API has changed input field '%s' from type '%s' to '%s'",
                                     leftField.getName(), getAstDesc(leftField.getType()), getAstDesc(rightField.get().getType()))
@@ -375,9 +375,9 @@ public class SchemaDiff {
                     differenceReporter.report(apiBreakage()
                             .category(STRICTER)
                             .typeName(left.getName())
-                            .typeOfType(getTypeOfType(left))
+                            .typeKind(TypeKind.getTypeKind(left))
                             .fieldName(rightField.getName())
-                            .reasonMsg("The new API has made the new input field '%s' non null (aka mandatory)", rightField.getName())
+                            .reasonMsg("The new API has made the new input field '%s' non null and hence more strict for old consumers", rightField.getName())
                             .build());
                 }
             }
@@ -396,7 +396,7 @@ public class SchemaDiff {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
                         .typeName(left.getName())
-                        .typeOfType(getTypeOfType(left))
+                        .typeKind(TypeKind.getTypeKind(left))
                         .reasonMsg("The new API is missing an enum value '%s'", leftEnum.getName())
                         .build());
             }
@@ -421,7 +421,7 @@ public class SchemaDiff {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
                         .typeName(left.getName())
-                        .typeOfType(getTypeOfType(left))
+                        .typeKind(TypeKind.getTypeKind(left))
                         .reasonMsg("The new API is missing the interface named '%s'", leftInterface.getName())
                         .build());
             } else {
@@ -437,7 +437,7 @@ public class SchemaDiff {
             String fieldName = entry.getKey();
             differenceReporter.report(newInfo()
                     .typeName(leftDef.getName())
-                    .typeOfType(getTypeOfType(leftDef))
+                    .typeKind(TypeKind.getTypeKind(leftDef))
                     .fieldName(fieldName)
                     .reasonMsg("\tfield '%s' ...", fieldName)
                     .build());
@@ -448,7 +448,7 @@ public class SchemaDiff {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
                         .typeName(leftDef.getName())
-                        .typeOfType(getTypeOfType(leftDef))
+                        .typeKind(TypeKind.getTypeKind(leftDef))
                         .fieldName(fieldName)
                         .reasonMsg("The new API is missing the field '%s'", fieldName)
                         .build());
@@ -468,13 +468,13 @@ public class SchemaDiff {
             differenceReporter.report(apiBreakage()
                     .category(category)
                     .typeName(left.getName())
-                    .typeOfType(getTypeOfType(left))
+                    .typeKind(TypeKind.getTypeKind(left))
                     .fieldName(leftField.getName())
                     .reasonMsg("The new API has changed field '%s' from type '%s' to '%s'", leftField.getName(), getAstDesc(leftFieldType), getAstDesc(rightFieldType))
                     .build());
         }
 
-        checkFieldArguments(left, leftField, leftField.getInputValueDefinitions(), rightField.getInputValueDefinitions());
+        checkFieldArguments(callContext, left, leftField, leftField.getInputValueDefinitions(), rightField.getInputValueDefinitions());
 
         checkDirectives(left, leftField.getDirectives(), rightField.getDirectives());
         //
@@ -483,7 +483,7 @@ public class SchemaDiff {
         checkType(callContext, leftFieldType, rightFieldType);
     }
 
-    private void checkFieldArguments(TypeDefinition leftDef, FieldDefinition leftField, List<InputValueDefinition> leftInputValueDefinitions, List<InputValueDefinition> rightInputValueDefinitions) {
+    private void checkFieldArguments(CallContext callContext, TypeDefinition leftDef, FieldDefinition leftField, List<InputValueDefinition> leftInputValueDefinitions, List<InputValueDefinition> rightInputValueDefinitions) {
         Map<String, InputValueDefinition> leftArgsMap = sortedMap(leftInputValueDefinitions, InputValueDefinition::getName);
         Map<String, InputValueDefinition> rightArgMap = sortedMap(rightInputValueDefinitions, InputValueDefinition::getName);
 
@@ -491,7 +491,7 @@ public class SchemaDiff {
             differenceReporter.report(apiBreakage()
                     .category(MISSING)
                     .typeName(leftDef.getName())
-                    .typeOfType(getTypeOfType(leftDef))
+                    .typeKind(TypeKind.getTypeKind(leftDef))
                     .fieldName(leftField.getName())
                     .reasonMsg("The new API has less arguments on field '%s' of type '%s' than the old API", leftField.getName(), leftDef.getName())
                     .build());
@@ -503,7 +503,7 @@ public class SchemaDiff {
             String argName = entry.getKey();
             differenceReporter.report(newInfo()
                     .typeName(leftDef.getName())
-                    .typeOfType(getTypeOfType(leftDef))
+                    .typeKind(TypeKind.getTypeKind(leftDef))
                     .fieldName(leftField.getName())
                     .reasonMsg("\tfield argument '%s' ...", argName)
                     .build());
@@ -514,17 +514,37 @@ public class SchemaDiff {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
                         .typeName(leftDef.getName())
-                        .typeOfType(getTypeOfType(leftDef))
+                        .typeKind(TypeKind.getTypeKind(leftDef))
                         .fieldName(leftField.getName())
                         .reasonMsg("The new API is missing the field argument '%s'", argName)
                         .build());
             } else {
-                checkFieldArg(leftDef, leftField, entry.getValue(), rightArg);
+                checkFieldArg(callContext, leftDef, leftField, entry.getValue(), rightArg);
             }
         }
+
+        // check new fields are not mandatory
+        for (Map.Entry<String, InputValueDefinition> entry : rightArgMap.entrySet()) {
+            InputValueDefinition rightArg = entry.getValue();
+            Optional<InputValueDefinition> leftArg = Optional.ofNullable(leftArgsMap.get(rightArg.getName()));
+
+            if (!leftArg.isPresent()) {
+                // new args MUST not be mandatory
+                if (typeInfo(rightArg.getType()).isNonNull()) {
+                    differenceReporter.report(apiBreakage()
+                            .category(STRICTER)
+                            .typeName(leftDef.getName())
+                            .typeKind(TypeKind.getTypeKind(leftDef))
+                            .fieldName(leftField.getName())
+                            .reasonMsg("The new API has made the new argument '%s' on field '%s' non null and hence more strict for old consumers", rightArg.getName(), leftField.getName())
+                            .build());
+                }
+            }
+        }
+
     }
 
-    private void checkFieldArg(TypeDefinition leftDef, FieldDefinition leftField, InputValueDefinition leftArg, InputValueDefinition rightArg) {
+    private void checkFieldArg(CallContext callContext, TypeDefinition leftDef, FieldDefinition leftField, InputValueDefinition leftArg, InputValueDefinition rightArg) {
 
         Type leftArgType = leftArg.getType();
         Type rightArgType = rightArg.getType();
@@ -534,10 +554,15 @@ public class SchemaDiff {
             differenceReporter.report(apiBreakage()
                     .category(category)
                     .typeName(leftDef.getName())
-                    .typeOfType(getTypeOfType(leftDef))
+                    .typeKind(TypeKind.getTypeKind(leftDef))
                     .fieldName(leftField.getName())
-                    .reasonMsg("The new API has changed field '%s' argument '%s' from type '%s' to '%s'", leftField.getName(), getAstDesc(leftArgType), getAstDesc(rightArgType))
+                    .reasonMsg("The new API has changed field '%s' argument '%s' from type '%s' to '%s'", leftField.getName(), leftArg.getName(), getAstDesc(leftArgType), getAstDesc(rightArgType))
                     .build());
+        } else {
+            //
+            // and down we go again recursively via arg types
+            //
+            checkType(callContext, leftArgType, rightArgType);
         }
 
         Value leftValue = leftArg.getDefaultValue();
@@ -547,7 +572,7 @@ public class SchemaDiff {
                 differenceReporter.report(apiBreakage()
                         .category(INVALID)
                         .typeName(leftDef.getName())
-                        .typeOfType(getTypeOfType(leftDef))
+                        .typeKind(TypeKind.getTypeKind(leftDef))
                         .fieldName(leftField.getName())
                         .reasonMsg("The new API has changed default value types on argument named '%s' on field '%s' of type '%s", leftArg.getName(), leftField.getName(), leftDef.getName())
                         .build());
@@ -579,7 +604,7 @@ public class SchemaDiff {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
                         .typeName(left.getName())
-                        .typeOfType(getTypeOfType(left))
+                        .typeKind(TypeKind.getTypeKind(left))
                         .reasonMsg("The new API does not have a directive named '%s", directiveName)
                         .build());
                 continue;
@@ -593,7 +618,7 @@ public class SchemaDiff {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
                         .typeName(left.getName())
-                        .typeOfType(getTypeOfType(left))
+                        .typeKind(TypeKind.getTypeKind(left))
                         .reasonMsg("The new API has less arguments on directive '%s' than the old API", directiveName)
                         .build());
                 return;
@@ -607,7 +632,7 @@ public class SchemaDiff {
                     differenceReporter.report(apiBreakage()
                             .category(MISSING)
                             .typeName(left.getName())
-                            .typeOfType(getTypeOfType(left))
+                            .typeKind(TypeKind.getTypeKind(left))
                             .reasonMsg("The new API does not have an argument named '%s' on directive '%s", argName, directiveName)
                             .build());
                 } else {
@@ -618,7 +643,7 @@ public class SchemaDiff {
                             differenceReporter.report(apiBreakage()
                                     .category(INVALID)
                                     .typeName(left.getName())
-                                    .typeOfType(getTypeOfType(left))
+                                    .typeKind(TypeKind.getTypeKind(left))
                                     .reasonMsg("The new API has changed value types on argument named '%s' on directive '%s", argName, directiveName)
                                     .build());
                         }
@@ -662,10 +687,6 @@ public class SchemaDiff {
             rightTypeInfo = rightTypeInfo.unwrapOne();
         }
         return null;
-    }
-
-    private TypeOfType getTypeOfType(TypeDefinition def) {
-        return TypeOfType.getTypeOfType(def);
     }
 
 
