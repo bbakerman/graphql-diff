@@ -3,7 +3,9 @@ package com.graphql.diff;
 import graphql.ExecutionResult;
 import graphql.GraphQL;
 import graphql.introspection.IntrospectionQuery;
+import graphql.schema.Coercing;
 import graphql.schema.DataFetcher;
+import graphql.schema.GraphQLScalarType;
 import graphql.schema.GraphQLSchema;
 import graphql.schema.PropertyDataFetcher;
 import graphql.schema.TypeResolver;
@@ -24,7 +26,6 @@ import java.util.Map;
 
 public class TestKit {
 
-
     private static final TypeResolver NULL_TYPE_RESOLVER = env -> null;
 
     static Map<String, Object> introspect(String name) {
@@ -44,7 +45,25 @@ public class TestKit {
         return new SchemaGenerator().makeExecutableSchema(typeRegistry, wiring);
     }
 
+    static GraphQLScalarType CUSTOM_SCALAR = new GraphQLScalarType("CustomScalar", "CustomScalar", new Coercing() {
+        @Override
+        public Object serialize(Object dataFetcherResult) {
+            throw new UnsupportedOperationException("Not implemented");
+        }
+
+        @Override
+        public Object parseValue(Object input) {
+            throw new UnsupportedOperationException("Not implemented");
+        }
+
+        @Override
+        public Object parseLiteral(Object input) {
+            throw new UnsupportedOperationException("Not implemented");
+        }
+    });
+
     static RuntimeWiring wireWithNoFetching() {
+
         return RuntimeWiring.newRuntimeWiring()
                 .wiringFactory(new WiringFactory() {
 
@@ -73,6 +92,7 @@ public class TestKit {
                         return new PropertyDataFetcher(environment.getFieldDefinition().getName());
                     }
                 })
+                .scalar(CUSTOM_SCALAR)
                 .build();
     }
 

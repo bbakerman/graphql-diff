@@ -14,11 +14,15 @@ public class DifferenceEvent {
         INFO, WARNING, ERROR
     }
 
-    public enum TypeOfTypes {
+    public enum Category {
+        MISSING, STRICTER, INVALID
+    }
+
+    public enum TypeOfType {
 
         Operation, Object, Interface, Union, Enum, Scalar, InputObject, Unknown;
 
-        public static TypeOfTypes getTypeOfType(TypeDefinition def) {
+        public static TypeOfType getTypeOfType(TypeDefinition def) {
             if (def instanceof ObjectTypeDefinition) {
                 return Object;
             }
@@ -45,13 +49,17 @@ public class DifferenceEvent {
 
 
     private final Level level;
+    private final Category category;
     private final String typeName;
-    private final TypeOfTypes typeOfType;
+    private final String fieldName;
+    private final TypeOfType typeOfType;
     private final String reasonMsg;
 
-    DifferenceEvent(Level level, String typeName, TypeOfTypes typeOfType, String reasonMsg) {
+    DifferenceEvent(Level level, Category category, String typeName, String fieldName, TypeOfType typeOfType, String reasonMsg) {
         this.level = level;
+        this.category = category;
         this.typeName = typeName;
+        this.fieldName = fieldName;
         this.typeOfType = typeOfType;
         this.reasonMsg = reasonMsg;
     }
@@ -60,7 +68,7 @@ public class DifferenceEvent {
         return typeName;
     }
 
-    public TypeOfTypes getTypeOfType() {
+    public TypeOfType getTypeOfType() {
         return typeOfType;
     }
 
@@ -70,6 +78,26 @@ public class DifferenceEvent {
 
     public Level getLevel() {
         return level;
+    }
+
+    public String getFieldName() {
+        return fieldName;
+    }
+
+    public Category getCategory() {
+        return category;
+    }
+
+    @Override
+    public String toString() {
+        return "DifferenceEvent{" +
+                "level=" + level +
+                ", category=" + category +
+                ", typeName='" + typeName + '\'' +
+                ", typeOfType=" + typeOfType +
+                ", fieldName=" + fieldName +
+                ", reasonMsg='" + reasonMsg + '\'' +
+                '}';
     }
 
     public static Builder newInfo() {
@@ -87,10 +115,12 @@ public class DifferenceEvent {
 
     public static class Builder {
 
+        Category category;
         Level level;
         String typeName;
-        TypeOfTypes typeOfType;
+        TypeOfType typeOfType;
         String reasonMsg;
+        String fieldName;
 
         public Builder level(Level level) {
             this.level = level;
@@ -103,8 +133,18 @@ public class DifferenceEvent {
             return this;
         }
 
-        public Builder typeOfType(TypeOfTypes typeOfType) {
+        public Builder fieldName(String fieldName) {
+            this.fieldName = fieldName;
+            return this;
+        }
+
+        public Builder typeOfType(TypeOfType typeOfType) {
             this.typeOfType = typeOfType;
+            return this;
+        }
+
+        public Builder category(Category category) {
+            this.category = category;
             return this;
         }
 
@@ -114,7 +154,7 @@ public class DifferenceEvent {
         }
 
         public DifferenceEvent build() {
-            return new DifferenceEvent(level, typeName, typeOfType, reasonMsg);
+            return new DifferenceEvent(level, category, typeName, fieldName, typeOfType, reasonMsg);
         }
 
 

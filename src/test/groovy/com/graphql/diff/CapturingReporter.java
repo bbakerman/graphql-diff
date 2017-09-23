@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class CapturingReporter extends PrintingReporter {
-    final List<DifferenceEvent> events = new ArrayList<>();
+    private final List<DifferenceEvent> events = new ArrayList<>();
 
     @Override
     public void report(DifferenceEvent differenceEvent) {
@@ -25,7 +25,7 @@ public class CapturingReporter extends PrintingReporter {
         return errors.size() == 0 ? null : errors.get(errors.size() - 1);
     }
 
-    private List<DifferenceEvent> getErrors() {
+    public List<DifferenceEvent> getErrors() {
         return events.stream().filter(e -> e.getLevel().equals(DifferenceEvent.Level.ERROR)).collect(Collectors.toList());
     }
 }

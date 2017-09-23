@@ -1,5 +1,6 @@
 schema {
     query : Query
+    mutation : Mutation
 }
 
 type Query {
@@ -9,13 +10,28 @@ type Query {
     wizards : [Istari]
     gods : [Ainur]
     deities : [Deity]
+
     allCharacters : [Character!] @deprecated(reason: "no longer supported")
+
+    customScalar : CustomScalar
 }
+
+type Mutation {
+    being(questor : Questor) : Query
+}
+
+input Questor {
+    beingID : ID
+    queryTarget : String
+}
+
+scalar CustomScalar
+
 
 interface Being {
     id : ID
-    name : String
-    nameInQuenyan : String
+    #name : String
+    #nameInQuenyan : String
     invitedBy(id : ID) : Being
 }
 
@@ -35,6 +51,7 @@ type Istari implements Being {
     nameInQuenyan : String
     invitedBy(id : ID) : Being
     colour : String
+    temperament : Temperament!
     
 }
 
@@ -47,5 +64,12 @@ type Deity implements Being {
 }
 
 union Character = Ainur | Istari | Deity
+
+enum Temperament {
+    Hero
+    Duplicitous
+    Evil
+}
+
 
 
