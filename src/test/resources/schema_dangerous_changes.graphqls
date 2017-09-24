@@ -4,7 +4,7 @@ schema {
 }
 
 type Query {
-    being(id : ID, type : String = "wizard") : Being
+    being(id : ID, type : String = "deity") : Being
     beings(type : String) : [Being]
 
     wizards : [Istari]
@@ -64,12 +64,21 @@ type Deity implements Being {
     outlook : String
 }
 
-union Character = Ainur | Istari | Deity
+type BenignFigure implements Being {
+    id : ID
+    name : String
+    nameInQuenyan : String
+    invitedBy(id : ID) : Being
+    coolFactor : String
+}
+
+union Character = Ainur | Istari | Deity | BenignFigure
 
 enum Temperament {
     Hero
     Duplicitous
     Evil
+    Nonplussed
 }
 
 

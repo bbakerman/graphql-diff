@@ -1,8 +1,5 @@
 package com.graphql.diff;
 
-import graphql.ExecutionResult;
-import graphql.GraphQL;
-import graphql.introspection.IntrospectionQuery;
 import graphql.schema.Coercing;
 import graphql.schema.DataFetcher;
 import graphql.schema.GraphQLScalarType;
@@ -22,21 +19,10 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.Reader;
-import java.util.Map;
 
 public class TestKit {
 
     private static final TypeResolver NULL_TYPE_RESOLVER = env -> null;
-
-    static Map<String, Object> introspect(String name) {
-
-        GraphQLSchema schema = loadSchemaFile(name);
-        GraphQL graphQL = GraphQL.newGraphQL(schema).build();
-
-        ExecutionResult executionResult = graphQL.execute(IntrospectionQuery.INTROSPECTION_QUERY);
-        return executionResult.getData();
-
-    }
 
     static GraphQLSchema loadSchemaFile(String name) {
         Reader streamReader = loadFile(name);

@@ -8,6 +8,9 @@ import graphql.language.ScalarTypeDefinition;
 import graphql.language.TypeDefinition;
 import graphql.language.UnionTypeDefinition;
 
+/**
+ * The kind of things that can be in a graphql type system
+ */
 public enum TypeKind {
 
     Operation, Object, Interface, Union, Enum, Scalar, InputObject, Unknown;

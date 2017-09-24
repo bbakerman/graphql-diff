@@ -1,17 +1,31 @@
 package com.graphql.diff.reporting;
 
+import java.io.PrintStream;
+
+/**
+ * A reporter that prints its output to a PrintStream
+ */
 public class PrintingReporter implements DifferenceReporter {
 
-    int errorCount = 0;
-    int warningCount = 0;
+    int breakageCount = 0;
+    int dangerCount = 0;
+    final PrintStream out;
+
+    public PrintingReporter() {
+        this(System.out);
+    }
+
+    public PrintingReporter(PrintStream out) {
+        this.out = out;
+    }
 
     @Override
     public void report(DifferenceEvent differenceEvent) {
-        if (differenceEvent.getLevel() == DifferenceEvent.Level.ERROR) {
-            errorCount++;
+        if (differenceEvent.getLevel() == DifferenceLevel.BREAKING) {
+            breakageCount++;
         }
-        if (differenceEvent.getLevel() == DifferenceEvent.Level.WARNING) {
-            warningCount++;
+        if (differenceEvent.getLevel() == DifferenceLevel.DANGEROUS) {
+            dangerCount++;
         }
 
         printEvent(differenceEvent);
@@ -19,21 +33,19 @@ public class PrintingReporter implements DifferenceReporter {
 
     @Override
     public void onEnd() {
-        System.out.println("\n");
-        System.out.println(String.format("%d errors", errorCount));
-        System.out.println(String.format("%d warnings", warningCount));
+        out.println("\n");
+        out.println(String.format("%d errors", breakageCount));
+        out.println(String.format("%d warnings", dangerCount));
+        out.println("\n");
     }
 
     private void printEvent(DifferenceEvent event) {
-        System.out.println(String.format(
-                "%s - %s type named '%s' : %s", event.getLevel(), event.getTypeOfType(), event.getTypeName(), event.getReasonMsg()));
-    }
-
-    public int getErrorCount() {
-        return errorCount;
-    }
-
-    public int getWarningCount() {
-        return warningCount;
+        String indent = event.getLevel() == DifferenceLevel.INFO ? "\t" : "";
+        String objectName = event.getTypeName();
+        if (event.getFieldName() != null) {
+            objectName = objectName + "." + event.getFieldName();
+        }
+        out.println(String.format(
+                "%s%s - '%s' : '%s' : %s", indent, event.getLevel(), event.getTypeKind(), objectName, event.getReasonMsg()));
     }
 }

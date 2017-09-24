@@ -6,26 +6,20 @@ import java.util.List;
 
 import static java.util.stream.Collectors.toList;
 
+/**
+ * This represents the events that the {@link com.graphql.diff.SchemaDiff} outputs.
+ */
 public class DifferenceEvent {
 
-    public enum Level {
-        INFO, WARNING, ERROR
-    }
-
-    public enum Category {
-        MISSING, STRICTER, INVALID
-    }
-
-
-    private final Level level;
-    private final Category category;
+    private final DifferenceLevel level;
+    private final DifferenceCategory category;
+    private final TypeKind typeOfType;
     private final String typeName;
     private final String fieldName;
-    private final TypeKind typeOfType;
     private final String reasonMsg;
     private final List<String> components;
 
-    DifferenceEvent(Level level, Category category, String typeName, String fieldName, TypeKind typeOfType, String reasonMsg, List<String> components) {
+    DifferenceEvent(DifferenceLevel level, DifferenceCategory category, String typeName, String fieldName, TypeKind typeOfType, String reasonMsg, List<String> components) {
         this.level = level;
         this.category = category;
         this.typeName = typeName;
@@ -39,7 +33,7 @@ public class DifferenceEvent {
         return typeName;
     }
 
-    public TypeKind getTypeOfType() {
+    public TypeKind getTypeKind() {
         return typeOfType;
     }
 
@@ -47,7 +41,7 @@ public class DifferenceEvent {
         return reasonMsg;
     }
 
-    public Level getLevel() {
+    public DifferenceLevel getLevel() {
         return level;
     }
 
@@ -55,7 +49,7 @@ public class DifferenceEvent {
         return fieldName;
     }
 
-    public Category getCategory() {
+    public DifferenceCategory getCategory() {
         return category;
     }
 
@@ -76,29 +70,29 @@ public class DifferenceEvent {
     }
 
     public static Builder newInfo() {
-        return new Builder().level(Level.INFO);
+        return new Builder().level(DifferenceLevel.INFO);
     }
 
-    public static Builder newWarning() {
-        return new Builder().level(Level.WARNING);
+    public static Builder apiDanger() {
+        return new Builder().level(DifferenceLevel.DANGEROUS);
     }
 
     public static Builder apiBreakage() {
-        return new Builder().level(Level.ERROR);
+        return new Builder().level(DifferenceLevel.BREAKING);
     }
 
 
     public static class Builder {
 
-        Category category;
-        Level level;
+        DifferenceCategory category;
+        DifferenceLevel level;
         String typeName;
         TypeKind typeOfType;
         String reasonMsg;
         String fieldName;
         List<String> components = new ArrayList<>();
 
-        public Builder level(Level level) {
+        public Builder level(DifferenceLevel level) {
             this.level = level;
             return this;
         }
@@ -119,7 +113,7 @@ public class DifferenceEvent {
             return this;
         }
 
-        public Builder category(Category category) {
+        public Builder category(DifferenceCategory category) {
             this.category = category;
             return this;
         }
@@ -137,7 +131,5 @@ public class DifferenceEvent {
         public DifferenceEvent build() {
             return new DifferenceEvent(level, category, typeName, fieldName, typeOfType, reasonMsg, components);
         }
-
-
     }
 }

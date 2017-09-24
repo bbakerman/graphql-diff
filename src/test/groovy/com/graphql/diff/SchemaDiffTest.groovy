@@ -1,5 +1,10 @@
 package com.graphql.diff
 
+import com.graphql.diff.reporting.CapturingReporter
+import com.graphql.diff.reporting.ChainedReporter
+import com.graphql.diff.reporting.DifferenceCategory
+import com.graphql.diff.reporting.DifferenceEvent
+import com.graphql.diff.reporting.PrintingReporter
 import com.graphql.diff.reporting.TypeKind
 import graphql.language.Argument
 import graphql.language.Directive
@@ -13,22 +18,24 @@ import graphql.language.TypeDefinition
 import graphql.language.TypeName
 import spock.lang.Specification
 
-import static com.graphql.diff.reporting.DifferenceEvent.Category.INVALID
-import static com.graphql.diff.reporting.DifferenceEvent.Category.MISSING
-import static com.graphql.diff.reporting.DifferenceEvent.Category.STRICTER
+import static com.graphql.diff.reporting.DifferenceCategory.INVALID
+import static com.graphql.diff.reporting.DifferenceCategory.MISSING
+import static com.graphql.diff.reporting.DifferenceCategory.STRICTER
 
 class SchemaDiffTest extends Specification {
     private CapturingReporter reporter
+    private ChainedReporter chainedReporter
 
     void setup() {
         reporter = new CapturingReporter()
+        chainedReporter = new ChainedReporter(reporter, new PrintingReporter())
     }
 
     DiffSet diffSet(String newFile) {
-        Map<String, Object> schemaOld = TestKit.introspect("schema_ABaseLine.graphqls")
-        Map<String, Object> schemaNew = TestKit.introspect(newFile)
+        def schemaOld = TestKit.loadSchemaFile("schema_ABaseLine.graphqls")
+        def schemaNew = TestKit.loadSchemaFile(newFile)
 
-        def diffSet = new DiffSet(schemaOld, schemaNew)
+        def diffSet = DiffSet.diffSet(schemaOld, schemaNew)
         diffSet
     }
 
@@ -42,7 +49,7 @@ class SchemaDiffTest extends Specification {
         Type less = new ListType(new TypeName("foo"))
 
 
-        def diff = new SchemaDiff(reporter)
+        def diff = new SchemaDiff()
 
         def sameType = diff.checkTypeWithNonNullAndList(baseLine, same)
 
@@ -64,7 +71,7 @@ class SchemaDiffTest extends Specification {
         Type baseLine = new NonNullType(new ListType(new TypeName("foo")))
         Type notList = new NonNullType(new TypeName("foo"))
 
-        def diff = new SchemaDiff(reporter)
+        def diff = new SchemaDiff()
 
         def noLongerList = diff.checkTypeWithNonNullAndList(baseLine, notList)
 
@@ -72,41 +79,50 @@ class SchemaDiffTest extends Specification {
         noLongerList == INVALID
     }
 
+    DifferenceEvent lastBreakage(CapturingReporter capturingReporter) {
+        def breakages = capturingReporter.getBreakages()
+        breakages.size() == 0 ? null : breakages.get(breakages.size() - 1)
+    }
+
     def "directives_controlled_via_options"() {
 
         given:
-        TypeDefinition left = new ObjectTypeDefinition("fooType")
+        SchemaDiff.Ctx ctx = new SchemaDiff.Ctx(reporter, null, null)
 
+        TypeDefinition left = new ObjectTypeDefinition("fooType")
 
         def oneDirective = [new Directive("bar")]
         def twoDirectives = [new Directive("foo"), new Directive("bar")]
 
-        def diff = new SchemaDiff(reporter)
-        diff.checkDirectives(left, twoDirectives, oneDirective)
-        def notChecked = reporter.lastError()
+        def diff = new SchemaDiff()
+        diff.checkDirectives(ctx, left, twoDirectives, oneDirective)
+        def notChecked = lastBreakage(reporter)
 
-        diff = new SchemaDiff(reporter, SchemaDiff.Options.defaultOptions().enforceDirectives())
-        diff.checkDirectives(left, twoDirectives, oneDirective)
-        def missingDirective = reporter.lastError()
+        diff = new SchemaDiff(SchemaDiff.Options.defaultOptions().enforceDirectives())
+        diff.checkDirectives(ctx, left, twoDirectives, oneDirective)
+        def missingDirective = lastBreakage(reporter)
 
         expect:
         notChecked == null
         missingDirective.category == MISSING
     }
 
+
     def "directives enforced to be the same"() {
 
         given:
+        SchemaDiff.Ctx ctx = new SchemaDiff.Ctx(reporter, null, null)
+
         TypeDefinition left = new ObjectTypeDefinition("fooType")
 
 
         def oneDirective = [new Directive("bar")]
         def twoDirectives = [new Directive("foo"), new Directive("bar")]
 
-        def diff = new SchemaDiff(reporter, SchemaDiff.Options.defaultOptions().enforceDirectives())
+        def diff = new SchemaDiff(SchemaDiff.Options.defaultOptions().enforceDirectives())
 
-        diff.checkDirectives(left, twoDirectives, oneDirective)
-        def missingDirective = reporter.lastError()
+        diff.checkDirectives(ctx, left, twoDirectives, oneDirective)
+        def missingDirective = lastBreakage(reporter)
 
         def oldDirective = new Directive("foo", [
                 new Argument("arg1", new StringValue("p1")),
@@ -118,8 +134,8 @@ class SchemaDiffTest extends Specification {
                 new Argument("arg3", new StringValue("p1")),
         ])
 
-        diff.checkDirectives(left, [oldDirective], [newDirective])
-        def missingArgs = reporter.lastError()
+        diff.checkDirectives(ctx, left, [oldDirective], [newDirective])
+        def missingArgs = lastBreakage(reporter)
 
 
         def newDirectiveDiffDefaultType = new Directive("foo", [
@@ -127,216 +143,244 @@ class SchemaDiffTest extends Specification {
                 new Argument("arg2", new IntValue(new BigInteger("123"))),
         ])
 
-        diff.checkDirectives(left, [oldDirective], [newDirectiveDiffDefaultType])
-        def changedType = reporter.lastError()
+        diff.checkDirectives(ctx, left, [oldDirective], [newDirectiveDiffDefaultType])
+        def changedType = lastBreakage(reporter)
 
         expect:
         missingDirective.category == MISSING
         missingArgs.category == MISSING
         changedType.category == INVALID
-        reporter.getErrorCount() == 3
+        reporter.getBreakageCount() == 3
     }
 
     def "same schema diff"() {
         DiffSet diffSet = diffSet("schema_ABaseLine.graphqls")
 
-        def diff = new SchemaDiff(reporter)
-        diff.diffSchema(diffSet)
+        def diff = new SchemaDiff()
+        diff.diffSchema(diffSet, chainedReporter)
 
         expect:
-        reporter.errorCount == 0
+        reporter.breakageCount == 0
     }
 
     def "missing fields on interface"() {
         DiffSet diffSet = diffSet("schema_interface_fields_missing.graphqls")
 
-        def diff = new SchemaDiff(reporter)
-        diff.diffSchema(diffSet)
+        def diff = new SchemaDiff()
+        diff.diffSchema(diffSet, chainedReporter)
 
         expect:
-        reporter.errorCount == 2 // 2 fields removed
-        reporter.errors[0].category == MISSING
-        reporter.errors[0].typeOfType == TypeKind.Interface
+        reporter.breakageCount == 2 // 2 fields removed
+        reporter.breakages[0].category == MISSING
+        reporter.breakages[0].typeKind == TypeKind.Interface
 
-        reporter.errors[1].category == MISSING
-        reporter.errors[1].typeOfType == TypeKind.Interface
+        reporter.breakages[1].category == MISSING
+        reporter.breakages[1].typeKind == TypeKind.Interface
     }
 
     def "missing members on union"() {
         DiffSet diffSet = diffSet("schema_missing_union_members.graphqls")
 
-        def diff = new SchemaDiff(reporter)
-        diff.diffSchema(diffSet)
+        def diff = new SchemaDiff()
+        diff.diffSchema(diffSet, chainedReporter)
 
         expect:
-        reporter.errorCount == 1 // 1 member removed
-        reporter.errors[0].category == MISSING
-        reporter.errors[0].typeOfType == TypeKind.Union
+        reporter.breakageCount == 1 // 1 member removed
+        reporter.breakages[0].category == MISSING
+        reporter.breakages[0].typeKind == TypeKind.Union
 
     }
 
     def "missing fields on object"() {
         DiffSet diffSet = diffSet("schema_missing_object_fields.graphqls")
 
-        def diff = new SchemaDiff(reporter)
-        diff.diffSchema(diffSet)
+        def diff = new SchemaDiff()
+        diff.diffSchema(diffSet, chainedReporter)
 
         expect:
-        reporter.errorCount == 2 // 2 fields removed
-        reporter.errors[0].category == MISSING
-        reporter.errors[0].typeOfType == TypeKind.Object
-        reporter.errors[0].fieldName == 'colour'
+        reporter.breakageCount == 2 // 2 fields removed
+        reporter.breakages[0].category == MISSING
+        reporter.breakages[0].typeKind == TypeKind.Object
+        reporter.breakages[0].fieldName == 'colour'
 
-        reporter.errors[1].category == MISSING
-        reporter.errors[1].typeOfType == TypeKind.Object
-        reporter.errors[1].fieldName == 'temperament'
+        reporter.breakages[1].category == MISSING
+        reporter.breakages[1].typeKind == TypeKind.Object
+        reporter.breakages[1].fieldName == 'temperament'
 
     }
 
     def "missing operation"() {
         DiffSet diffSet = diffSet("schema_missing_operation.graphqls")
 
-        def diff = new SchemaDiff(reporter)
-        diff.diffSchema(diffSet)
+        def diff = new SchemaDiff()
+        diff.diffSchema(diffSet, chainedReporter)
 
         expect:
-        reporter.errorCount == 1
-        reporter.errors[0].category == MISSING
-        reporter.errors[0].typeOfType == TypeKind.Operation
-        reporter.errors[0].fieldName == 'mutation'
+        reporter.breakageCount == 1
+        reporter.breakages[0].category == MISSING
+        reporter.breakages[0].typeKind == TypeKind.Operation
+        reporter.breakages[0].fieldName == 'mutation'
 
     }
 
     def "missing input object fields"() {
         DiffSet diffSet = diffSet("schema_missing_input_object_fields.graphqls")
 
-        def diff = new SchemaDiff(reporter)
-        diff.diffSchema(diffSet)
+        def diff = new SchemaDiff()
+        diff.diffSchema(diffSet, chainedReporter)
 
         expect:
-        reporter.errorCount == 1
-        reporter.errors[0].category == MISSING
-        reporter.errors[0].typeOfType == TypeKind.InputObject
-        reporter.errors[0].fieldName == 'queryTarget'
+        reporter.breakageCount == 1
+        reporter.breakages[0].category == MISSING
+        reporter.breakages[0].typeKind == TypeKind.InputObject
+        reporter.breakages[0].fieldName == 'queryTarget'
 
     }
 
     def "changed input object field types"() {
         DiffSet diffSet = diffSet("schema_changed_input_object_fields.graphqls")
 
-        def diff = new SchemaDiff(reporter)
-        diff.diffSchema(diffSet)
+        def diff = new SchemaDiff()
+        diff.diffSchema(diffSet, chainedReporter)
 
         expect:
-        reporter.errorCount == 2
-        reporter.errors[0].category == INVALID
-        reporter.errors[0].typeName == 'Questor'
-        reporter.errors[0].typeOfType == TypeKind.InputObject
-        reporter.errors[0].fieldName == 'queryTarget'
+        reporter.breakageCount == 2
+        reporter.breakages[0].category == INVALID
+        reporter.breakages[0].typeName == 'Questor'
+        reporter.breakages[0].typeKind == TypeKind.InputObject
+        reporter.breakages[0].fieldName == 'queryTarget'
 
-        reporter.errors[1].category == STRICTER
-        reporter.errors[1].typeName == 'Questor'
-        reporter.errors[1].typeOfType == TypeKind.InputObject
-        reporter.errors[1].fieldName == 'newMandatoryField'
+        reporter.breakages[1].category == STRICTER
+        reporter.breakages[1].typeName == 'Questor'
+        reporter.breakages[1].typeKind == TypeKind.InputObject
+        reporter.breakages[1].fieldName == 'newMandatoryField'
 
     }
 
     def "changed type kind"() {
         DiffSet diffSet = diffSet("schema_changed_type_kind.graphqls")
 
-        def diff = new SchemaDiff(reporter)
-        diff.diffSchema(diffSet)
+        def diff = new SchemaDiff()
+        diff.diffSchema(diffSet, chainedReporter)
 
         expect:
-        reporter.errorCount == 1
-        reporter.errors[0].category == INVALID
-        reporter.errors[0].typeName == 'Character'
-        reporter.errors[0].typeOfType == TypeKind.Union
+        reporter.breakageCount == 1
+        reporter.breakages[0].category == INVALID
+        reporter.breakages[0].typeName == 'Character'
+        reporter.breakages[0].typeKind == TypeKind.Union
 
     }
 
     def "missing object field args"() {
         DiffSet diffSet = diffSet("schema_missing_field_arguments.graphqls")
 
-        def diff = new SchemaDiff(reporter)
-        diff.diffSchema(diffSet)
+        def diff = new SchemaDiff()
+        diff.diffSchema(diffSet, chainedReporter)
 
         expect:
-        reporter.errorCount == 2
+        reporter.breakageCount == 2
 
-        reporter.errors[0].category == MISSING
-        reporter.errors[0].typeOfType == TypeKind.Object
-        reporter.errors[0].typeName == "Mutation"
-        reporter.errors[0].fieldName == 'being'
-        reporter.errors[0].components.contains("questor")
+        reporter.breakages[0].category == MISSING
+        reporter.breakages[0].typeKind == TypeKind.Object
+        reporter.breakages[0].typeName == "Mutation"
+        reporter.breakages[0].fieldName == 'being'
+        reporter.breakages[0].components.contains("questor")
 
-        reporter.errors[1].category == MISSING
-        reporter.errors[1].typeOfType == TypeKind.Object
-        reporter.errors[0].typeName == "Mutation"
-        reporter.errors[1].fieldName == 'sword'
+        reporter.breakages[1].category == MISSING
+        reporter.breakages[1].typeKind == TypeKind.Object
+        reporter.breakages[0].typeName == "Mutation"
+        reporter.breakages[1].fieldName == 'sword'
 
     }
 
     def "missing enum value"() {
         DiffSet diffSet = diffSet("schema_missing_enum_value.graphqls")
 
-        def diff = new SchemaDiff(reporter)
-        diff.diffSchema(diffSet)
+        def diff = new SchemaDiff()
+        diff.diffSchema(diffSet, chainedReporter)
 
         expect:
-        reporter.errorCount == 1
-        reporter.errors[0].category == MISSING
-        reporter.errors[0].typeOfType == TypeKind.Enum
-        reporter.errors[0].typeName == 'Temperament'
-        reporter.errors[0].components.contains("Duplicitous")
+        reporter.breakageCount == 1
+        reporter.breakages[0].category == MISSING
+        reporter.breakages[0].typeKind == TypeKind.Enum
+        reporter.breakages[0].typeName == 'Temperament'
+        reporter.breakages[0].components.contains("Duplicitous")
 
     }
 
     def "changed object field args"() {
         DiffSet diffSet = diffSet("schema_changed_field_arguments.graphqls")
 
-        def diff = new SchemaDiff(reporter)
-        diff.diffSchema(diffSet)
+        def diff = new SchemaDiff()
+        diff.diffSchema(diffSet, chainedReporter)
 
         expect:
-        reporter.errorCount == 2
-        reporter.errors[0].category == INVALID
-        reporter.errors[0].typeOfType == TypeKind.Object
-        reporter.errors[0].fieldName == 'sword'
+        reporter.breakageCount == 2
+        reporter.breakages[0].category == INVALID
+        reporter.breakages[0].typeKind == TypeKind.Object
+        reporter.breakages[0].fieldName == 'sword'
 
-        reporter.errors[1].category == INVALID
-        reporter.errors[1].typeOfType == TypeKind.Object
-        reporter.errors[1].fieldName == 'sword'
+        reporter.breakages[1].category == INVALID
+        reporter.breakages[1].typeKind == TypeKind.Object
+        reporter.breakages[1].fieldName == 'sword'
 
     }
 
     def "changed type on object"() {
         DiffSet diffSet = diffSet("schema_changed_object_fields.graphqls")
 
-        def diff = new SchemaDiff(reporter)
-        diff.diffSchema(diffSet)
+        def diff = new SchemaDiff()
+        diff.diffSchema(diffSet, chainedReporter)
 
         expect:
-        reporter.errorCount == 4
-        reporter.errors[0].category == STRICTER
-        reporter.errors[0].typeName == 'Query'
-        reporter.errors[0].typeOfType == TypeKind.Object
-        reporter.errors[0].fieldName == 'being'
+        reporter.breakageCount == 4
+        reporter.breakages[0].category == STRICTER
+        reporter.breakages[0].typeName == 'Query'
+        reporter.breakages[0].typeKind == TypeKind.Object
+        reporter.breakages[0].fieldName == 'being'
 
-        reporter.errors[1].category == INVALID
-        reporter.errors[1].typeName == 'Query'
-        reporter.errors[1].typeOfType == TypeKind.Object
-        reporter.errors[1].fieldName == 'beings'
+        reporter.breakages[1].category == INVALID
+        reporter.breakages[1].typeName == 'Query'
+        reporter.breakages[1].typeKind == TypeKind.Object
+        reporter.breakages[1].fieldName == 'beings'
 
-        reporter.errors[2].category == STRICTER
-        reporter.errors[2].typeName == 'Query'
-        reporter.errors[2].typeOfType == TypeKind.Object
-        reporter.errors[2].fieldName == 'customScalar'
+        reporter.breakages[2].category == STRICTER
+        reporter.breakages[2].typeName == 'Query'
+        reporter.breakages[2].typeKind == TypeKind.Object
+        reporter.breakages[2].fieldName == 'customScalar'
 
-        reporter.errors[3].category == STRICTER
-        reporter.errors[3].typeName == 'Query'
-        reporter.errors[3].typeOfType == TypeKind.Object
-        reporter.errors[3].fieldName == 'wizards'
+        reporter.breakages[3].category == STRICTER
+        reporter.breakages[3].typeName == 'Query'
+        reporter.breakages[3].typeKind == TypeKind.Object
+        reporter.breakages[3].fieldName == 'wizards'
+
+    }
+
+    def "dangerous changes "() {
+        DiffSet diffSet = diffSet("schema_dangerous_changes.graphqls")
+
+        def diff = new SchemaDiff()
+        diff.diffSchema(diffSet, chainedReporter)
+
+        expect:
+        reporter.breakageCount == 0
+        reporter.dangerCount == 3
+
+        reporter.dangers[0].category == DifferenceCategory.ADDITION
+        reporter.dangers[0].typeName == "Character"
+        reporter.dangers[0].typeKind == TypeKind.Union
+        reporter.dangers[0].components.contains("BenignFigure")
+
+        reporter.dangers[1].category == DifferenceCategory.DIFFERENT
+        reporter.dangers[1].typeName == "Query"
+        reporter.dangers[1].typeKind == TypeKind.Object
+        reporter.dangers[1].fieldName == "being"
+        reporter.dangers[1].components.contains("type")
+
+        reporter.dangers[2].category == DifferenceCategory.ADDITION
+        reporter.dangers[2].typeName == "Temperament"
+        reporter.dangers[2].typeKind == TypeKind.Enum
+        reporter.dangers[2].components.contains("Nonplussed")
 
     }
 
