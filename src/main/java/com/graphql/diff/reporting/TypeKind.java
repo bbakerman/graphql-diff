@@ -33,6 +33,4 @@ public enum TypeKind {
         }
         return Unknown;
     }
-
-
 }

@@ -40,6 +40,7 @@ import static com.graphql.diff.reporting.DifferenceEvent.Category.MISSING;
 import static com.graphql.diff.reporting.DifferenceEvent.Category.STRICTER;
 import static com.graphql.diff.reporting.DifferenceEvent.apiBreakage;
 import static com.graphql.diff.reporting.DifferenceEvent.newInfo;
+import static com.graphql.diff.reporting.TypeKind.getTypeKind;
 import static com.graphql.diff.util.TypeInfo.getAstDesc;
 import static com.graphql.diff.util.TypeInfo.typeInfo;
 
@@ -67,12 +68,12 @@ public class SchemaDiff {
     private static class CallContext {
         final List<String> examinedTypes = new ArrayList<>();
         final Stack<String> currentTypes = new Stack<>();
-        final Document leftDoc;
-        final Document rightDoc;
+        final Document oldDoc;
+        final Document newDoc;
 
-        private CallContext(Document leftDoc, Document rightDoc) {
-            this.leftDoc = leftDoc;
-            this.rightDoc = rightDoc;
+        private CallContext(Document oldDoc, Document newDoc) {
+            this.oldDoc = oldDoc;
+            this.newDoc = newDoc;
         }
 
         boolean examiningType(String typeName) {
@@ -88,12 +89,12 @@ public class SchemaDiff {
             currentTypes.pop();
         }
 
-        <T extends TypeDefinition> Optional<T> getLeftTypeDef(Type type, Class<T> typeDefClass) {
-            return getType(getTypeName(type), typeDefClass, leftDoc);
+        <T extends TypeDefinition> Optional<T> getOldTypeDef(Type type, Class<T> typeDefClass) {
+            return getType(getTypeName(type), typeDefClass, oldDoc);
         }
 
-        <T extends TypeDefinition> Optional<T> getRightTypeDef(Type type, Class<T> typeDefClass) {
-            return getType(getTypeName(type), typeDefClass, rightDoc);
+        <T extends TypeDefinition> Optional<T> getNewTypeDef(Type type, Class<T> typeDefClass) {
+            return getType(getTypeName(type), typeDefClass, newDoc);
         }
 
         private <T extends TypeDefinition> Optional<T> getType(String typeName, Class<T> typeDefClass, Document doc) {
@@ -125,72 +126,75 @@ public class SchemaDiff {
     @SuppressWarnings("unchecked")
     public void diffSchema(DiffSet diffSet) {
 
-        Map<String, Object> left = diffSet.getLeft();
-        Map<String, Object> right = diffSet.getRight();
+        Map<String, Object> oldAPI = diffSet.getOld();
+        Map<String, Object> newAPI = diffSet.getNew();
 
-        diffSchemaImpl(left, right);
+        diffSchemaImpl(oldAPI, newAPI);
     }
 
-    private void diffSchemaImpl(Map<String, Object> left, Map<String, Object> right) {
-        Document leftDoc = new IntrospectionResultToSchema().createSchemaDefinition(left);
-        Document rightDoc = new IntrospectionResultToSchema().createSchemaDefinition(right);
+    private void diffSchemaImpl(Map<String, Object> oldApi, Map<String, Object> newApi) {
+        Document oldDoc = new IntrospectionResultToSchema().createSchemaDefinition(oldApi);
+        Document newDoc = new IntrospectionResultToSchema().createSchemaDefinition(newApi);
 
-        CallContext callContext = new CallContext(leftDoc, rightDoc);
+        CallContext callContext = new CallContext(oldDoc, newDoc);
 
 
-        Optional<SchemaDefinition> leftSchemaDef = getSchemaDef(leftDoc);
-        Optional<SchemaDefinition> rightSchemaDef = getSchemaDef(rightDoc);
+        Optional<SchemaDefinition> oldSchemaDef = getSchemaDef(oldDoc);
+        Optional<SchemaDefinition> newSchemaDef = getSchemaDef(newDoc);
 
 
         // check query operation
-        checkOperation("query", callContext, leftSchemaDef, rightSchemaDef);
-        checkOperation("mutation", callContext, leftSchemaDef, rightSchemaDef);
-        checkOperation("subscription", callContext, leftSchemaDef, rightSchemaDef);
+        checkOperation("query", callContext, oldSchemaDef, newSchemaDef);
+        checkOperation("mutation", callContext, oldSchemaDef, newSchemaDef);
+        checkOperation("subscription", callContext, oldSchemaDef, newSchemaDef);
+
+        differenceReporter.onEnd();
     }
 
-    private void checkOperation(String opName, CallContext callContext, Optional<SchemaDefinition> leftSchemaDef, Optional<SchemaDefinition> rightSchemaDef) {
+    private void checkOperation(String opName, CallContext callContext, Optional<SchemaDefinition> oldSchemaDef, Optional<SchemaDefinition> newSchemaDef) {
         // if schema declaration is missing then it is assumed to contain Query / Mutation / Subscription
-        Optional<OperationTypeDefinition> leftOpTypeDef;
-        leftOpTypeDef = leftSchemaDef
+        Optional<OperationTypeDefinition> oldOpTypeDef;
+        oldOpTypeDef = oldSchemaDef
                 .map(schemaDefinition -> getOpDef(opName, schemaDefinition))
-                .orElseGet(() -> synthOperationTypeDefinition(type -> callContext.getLeftTypeDef(type, ObjectTypeDefinition.class), opName));
+                .orElseGet(() -> synthOperationTypeDefinition(type -> callContext.getOldTypeDef(type, ObjectTypeDefinition.class), opName));
 
-        Optional<OperationTypeDefinition> rightOpTypeDef;
-        rightOpTypeDef = rightSchemaDef
+        Optional<OperationTypeDefinition> newOpTypeDef;
+        newOpTypeDef = newSchemaDef
                 .map(schemaDefinition -> getOpDef(opName, schemaDefinition))
-                .orElseGet(() -> synthOperationTypeDefinition(type -> callContext.getRightTypeDef(type, ObjectTypeDefinition.class), opName));
+                .orElseGet(() -> synthOperationTypeDefinition(type -> callContext.getNewTypeDef(type, ObjectTypeDefinition.class), opName));
 
         // must be new
-        if (!leftOpTypeDef.isPresent()) {
+        if (!oldOpTypeDef.isPresent()) {
             return;
         }
 
-        if (leftOpTypeDef.isPresent() && !rightOpTypeDef.isPresent()) {
+        if (oldOpTypeDef.isPresent() && !newOpTypeDef.isPresent()) {
             differenceReporter.report(apiBreakage()
                     .category(MISSING)
                     .typeName(capitalize(opName))
                     .fieldName(opName)
                     .typeKind(TypeKind.Operation)
+                    .components(opName)
                     .reasonMsg("The new API no longer has the operation '%s'", opName)
                     .build());
             return;
         }
 
-        OperationTypeDefinition leftOpTypeDefinition = leftOpTypeDef.get();
-        OperationTypeDefinition rightOpTypeDefinition = rightOpTypeDef.get();
+        OperationTypeDefinition oldOpTypeDefinition = oldOpTypeDef.get();
+        OperationTypeDefinition newOpTypeDefinition = newOpTypeDef.get();
 
-        Type leftType = leftOpTypeDefinition.getType();
+        Type oldType = oldOpTypeDefinition.getType();
         //
-        // if we have no left op, then it must have been added (which is ok)
-        Optional<TypeDefinition> leftTD = callContext.getLeftTypeDef(leftType, TypeDefinition.class);
-        if (!leftTD.isPresent()) {
+        // if we have no old op, then it must have been added (which is ok)
+        Optional<TypeDefinition> oldTD = callContext.getOldTypeDef(oldType, TypeDefinition.class);
+        if (!oldTD.isPresent()) {
             return;
         }
-        checkType(callContext, leftType, rightOpTypeDefinition.getType());
+        checkType(callContext, oldType, newOpTypeDefinition.getType());
     }
 
-    private void checkType(CallContext callContext, Type leftType, Type rightType) {
-        String typeName = getTypeName(leftType);
+    private void checkType(CallContext callContext, Type oldType, Type newType) {
+        String typeName = getTypeName(oldType);
 
         if (callContext.examiningType(typeName)) {
             return;
@@ -201,63 +205,64 @@ public class SchemaDiff {
         if (isReservedType(typeName)) {
             return;
         }
-        Optional<TypeDefinition> leftTD = callContext.getLeftTypeDef(leftType, TypeDefinition.class);
-        Optional<TypeDefinition> rightTD = callContext.getRightTypeDef(rightType, TypeDefinition.class);
+        Optional<TypeDefinition> oldTD = callContext.getOldTypeDef(oldType, TypeDefinition.class);
+        Optional<TypeDefinition> newTD = callContext.getNewTypeDef(newType, TypeDefinition.class);
 
-        if (!leftTD.isPresent()) {
+        if (!oldTD.isPresent()) {
             differenceReporter.report(newInfo()
                     .typeName(typeName)
-                    .reasonMsg("Type '%s' is missing ???", typeName)
+                    .reasonMsg("Type '%s' is missing", typeName)
                     .build());
             return;
 
         }
-        TypeDefinition left = leftTD.get();
+        TypeDefinition oldDef = oldTD.get();
 
         differenceReporter.report(newInfo()
                 .typeName(typeName)
-                .typeKind(TypeKind.getTypeKind(left))
+                .typeKind(getTypeKind(oldDef))
                 .reasonMsg("Examining type '%s' ...", typeName)
                 .build());
 
-        if (!rightTD.isPresent()) {
+        if (!newTD.isPresent()) {
             differenceReporter.report(apiBreakage()
                     .category(MISSING)
                     .typeName(typeName)
-                    .typeKind(TypeKind.getTypeKind(left))
+                    .typeKind(getTypeKind(oldDef))
                     .reasonMsg("The new API does not have a type called '%s'", typeName)
                     .build());
             callContext.exitType();
             return;
         }
-        TypeDefinition right = rightTD.get();
-        if (!left.getClass().equals(right.getClass())) {
+        TypeDefinition newDef = newTD.get();
+        if (!oldDef.getClass().equals(newDef.getClass())) {
             differenceReporter.report(apiBreakage()
                     .category(INVALID)
                     .typeName(typeName)
-                    .typeKind(TypeKind.getTypeKind(left))
-                    .reasonMsg("The new API has changed '%s' from a '%s' to a '%s'", typeName, TypeKind.getTypeKind(left), TypeKind.getTypeKind(right))
+                    .typeKind(getTypeKind(oldDef))
+                    .components(getTypeKind(oldDef), getTypeKind(newDef))
+                    .reasonMsg("The new API has changed '%s' from a '%s' to a '%s'", typeName, getTypeKind(oldDef), getTypeKind(newDef))
                     .build());
             callContext.exitType();
             return;
         }
-        if (left instanceof ObjectTypeDefinition) {
-            checkObjectType(callContext, (ObjectTypeDefinition) left, (ObjectTypeDefinition) right);
+        if (oldDef instanceof ObjectTypeDefinition) {
+            checkObjectType(callContext, (ObjectTypeDefinition) oldDef, (ObjectTypeDefinition) newDef);
         }
-        if (left instanceof InterfaceTypeDefinition) {
-            checkInterfaceType(callContext, (InterfaceTypeDefinition) left, (InterfaceTypeDefinition) right);
+        if (oldDef instanceof InterfaceTypeDefinition) {
+            checkInterfaceType(callContext, (InterfaceTypeDefinition) oldDef, (InterfaceTypeDefinition) newDef);
         }
-        if (left instanceof UnionTypeDefinition) {
-            checkUnionType((UnionTypeDefinition) left, (UnionTypeDefinition) right);
+        if (oldDef instanceof UnionTypeDefinition) {
+            checkUnionType((UnionTypeDefinition) oldDef, (UnionTypeDefinition) newDef);
         }
-        if (left instanceof InputObjectTypeDefinition) {
-            checkInputObjectType((InputObjectTypeDefinition) left, (InputObjectTypeDefinition) right);
+        if (oldDef instanceof InputObjectTypeDefinition) {
+            checkInputObjectType((InputObjectTypeDefinition) oldDef, (InputObjectTypeDefinition) newDef);
         }
-        if (left instanceof EnumTypeDefinition) {
-            checkEnumType((EnumTypeDefinition) left, (EnumTypeDefinition) right);
+        if (oldDef instanceof EnumTypeDefinition) {
+            checkEnumType((EnumTypeDefinition) oldDef, (EnumTypeDefinition) newDef);
         }
-        if (left instanceof ScalarTypeDefinition) {
-            checkScalarType((ScalarTypeDefinition) left, (ScalarTypeDefinition) right);
+        if (oldDef instanceof ScalarTypeDefinition) {
+            checkScalarType((ScalarTypeDefinition) oldDef, (ScalarTypeDefinition) newDef);
         }
         callContext.exitType();
     }
@@ -287,256 +292,263 @@ public class SchemaDiff {
         return SYSTEM_SCALARS.contains(typeName);
     }
 
-    private void checkObjectType(CallContext callContext, ObjectTypeDefinition left, ObjectTypeDefinition right) {
-        Map<String, FieldDefinition> leftFields = sortedMap(left.getFieldDefinitions(), FieldDefinition::getName);
-        Map<String, FieldDefinition> rightFields = sortedMap(right.getFieldDefinitions(), FieldDefinition::getName);
+    private void checkObjectType(CallContext callContext, ObjectTypeDefinition oldDef, ObjectTypeDefinition newDef) {
+        Map<String, FieldDefinition> oldFields = sortedMap(oldDef.getFieldDefinitions(), FieldDefinition::getName);
+        Map<String, FieldDefinition> newFields = sortedMap(newDef.getFieldDefinitions(), FieldDefinition::getName);
 
-        checkFields(callContext, left, leftFields, rightFields);
+        checkFields(callContext, oldDef, oldFields, newFields);
 
-        checkImplements(callContext, left, left.getImplements(), right.getImplements());
+        checkImplements(callContext, oldDef, oldDef.getImplements(), newDef.getImplements());
 
-        checkDirectives(left, right);
+        checkDirectives(oldDef, newDef);
     }
 
-    private void checkInterfaceType(CallContext callContext, InterfaceTypeDefinition left, InterfaceTypeDefinition right) {
-        Map<String, FieldDefinition> leftFields = sortedMap(left.getFieldDefinitions(), FieldDefinition::getName);
-        Map<String, FieldDefinition> rightFields = sortedMap(right.getFieldDefinitions(), FieldDefinition::getName);
+    private void checkInterfaceType(CallContext callContext, InterfaceTypeDefinition oldDef, InterfaceTypeDefinition newDef) {
+        Map<String, FieldDefinition> oldFields = sortedMap(oldDef.getFieldDefinitions(), FieldDefinition::getName);
+        Map<String, FieldDefinition> newFields = sortedMap(newDef.getFieldDefinitions(), FieldDefinition::getName);
 
-        checkFields(callContext, left, leftFields, rightFields);
+        checkFields(callContext, oldDef, oldFields, newFields);
 
-        checkDirectives(left, right);
+        checkDirectives(oldDef, newDef);
     }
 
-    private void checkUnionType(UnionTypeDefinition left, UnionTypeDefinition right) {
-        Map<String, Type> leftMemberTypes = sortedMap(left.getMemberTypes(), SchemaDiff::getTypeName);
-        Map<String, Type> rightMemberTypes = sortedMap(right.getMemberTypes(), SchemaDiff::getTypeName);
+    private void checkUnionType(UnionTypeDefinition oldDef, UnionTypeDefinition newDef) {
+        Map<String, Type> oldMemberTypes = sortedMap(oldDef.getMemberTypes(), SchemaDiff::getTypeName);
+        Map<String, Type> newMemberTypes = sortedMap(newDef.getMemberTypes(), SchemaDiff::getTypeName);
 
-        for (Map.Entry<String, Type> entry : leftMemberTypes.entrySet()) {
-            String leftMemberTypeName = entry.getKey();
-            if (!rightMemberTypes.containsKey(leftMemberTypeName)) {
+        for (Map.Entry<String, Type> entry : oldMemberTypes.entrySet()) {
+            String oldMemberTypeName = entry.getKey();
+            if (!newMemberTypes.containsKey(oldMemberTypeName)) {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
-                        .typeName(left.getName())
-                        .typeKind(TypeKind.getTypeKind(left))
-                        .reasonMsg("The new API does not contain union member type '%s'", leftMemberTypeName)
+                        .typeName(oldDef.getName())
+                        .typeKind(getTypeKind(oldDef))
+                        .components(oldMemberTypeName)
+                        .reasonMsg("The new API does not contain union member type '%s'", oldMemberTypeName)
                         .build());
             }
         }
-        checkDirectives(left, right);
+        checkDirectives(oldDef, newDef);
     }
 
 
-    private void checkInputObjectType(InputObjectTypeDefinition left, InputObjectTypeDefinition right) {
+    private void checkInputObjectType(InputObjectTypeDefinition oldDef, InputObjectTypeDefinition newDef) {
 
-        checkInputFields(left, left.getInputValueDefinitions(), right.getInputValueDefinitions());
+        checkInputFields(oldDef, oldDef.getInputValueDefinitions(), newDef.getInputValueDefinitions());
 
-        checkDirectives(left, right);
+        checkDirectives(oldDef, newDef);
     }
 
-    private void checkInputFields(TypeDefinition left, List<InputValueDefinition> leftIVD, List<InputValueDefinition> rightIVD) {
-        Map<String, InputValueDefinition> leftDefinitionMap = sortedMap(leftIVD, InputValueDefinition::getName);
-        Map<String, InputValueDefinition> rightDefinitionMap = sortedMap(rightIVD, InputValueDefinition::getName);
+    private void checkInputFields(TypeDefinition old, List<InputValueDefinition> oldIVD, List<InputValueDefinition> newIVD) {
+        Map<String, InputValueDefinition> oldDefinitionMap = sortedMap(oldIVD, InputValueDefinition::getName);
+        Map<String, InputValueDefinition> newDefinitionMap = sortedMap(newIVD, InputValueDefinition::getName);
 
-        for (String inputFieldName : leftDefinitionMap.keySet()) {
-            InputValueDefinition leftField = leftDefinitionMap.get(inputFieldName);
-            Optional<InputValueDefinition> rightField = Optional.ofNullable(rightDefinitionMap.get(inputFieldName));
+        for (String inputFieldName : oldDefinitionMap.keySet()) {
+            InputValueDefinition oldField = oldDefinitionMap.get(inputFieldName);
+            Optional<InputValueDefinition> newField = Optional.ofNullable(newDefinitionMap.get(inputFieldName));
 
-            if (!rightField.isPresent()) {
+            if (!newField.isPresent()) {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
-                        .typeName(left.getName())
-                        .typeKind(TypeKind.getTypeKind(left))
-                        .fieldName(leftField.getName())
-                        .reasonMsg("The new API is missing an input field '%s'", leftField.getName())
+                        .typeName(old.getName())
+                        .typeKind(getTypeKind(old))
+                        .fieldName(oldField.getName())
+                        .reasonMsg("The new API is missing an input field '%s'", oldField.getName())
                         .build());
             } else {
-                DifferenceEvent.Category category = checkTypeWithNonNullAndList(leftField.getType(), rightField.get().getType());
+                DifferenceEvent.Category category = checkTypeWithNonNullAndList(oldField.getType(), newField.get().getType());
                 if (category != null) {
                     differenceReporter.report(apiBreakage()
                             .category(category)
-                            .typeName(left.getName())
-                            .typeKind(TypeKind.getTypeKind(left))
-                            .fieldName(leftField.getName())
+                            .typeName(old.getName())
+                            .typeKind(getTypeKind(old))
+                            .fieldName(oldField.getName())
+                            .components(getAstDesc(oldField.getType()), getAstDesc(newField.get().getType()))
                             .reasonMsg("The new API has changed input field '%s' from type '%s' to '%s'",
-                                    leftField.getName(), getAstDesc(leftField.getType()), getAstDesc(rightField.get().getType()))
+                                    oldField.getName(), getAstDesc(oldField.getType()), getAstDesc(newField.get().getType()))
                             .build());
                 }
             }
         }
 
         // check new fields are not mandatory
-        for (String inputFieldName : rightDefinitionMap.keySet()) {
-            InputValueDefinition rightField = rightDefinitionMap.get(inputFieldName);
-            Optional<InputValueDefinition> leftField = Optional.ofNullable(leftDefinitionMap.get(inputFieldName));
+        for (String inputFieldName : newDefinitionMap.keySet()) {
+            InputValueDefinition newField = newDefinitionMap.get(inputFieldName);
+            Optional<InputValueDefinition> oldField = Optional.ofNullable(oldDefinitionMap.get(inputFieldName));
 
-            if (!leftField.isPresent()) {
+            if (!oldField.isPresent()) {
                 // new fields MUST not be mandatory
-                if (typeInfo(rightField.getType()).isNonNull()) {
+                if (typeInfo(newField.getType()).isNonNull()) {
                     differenceReporter.report(apiBreakage()
                             .category(STRICTER)
-                            .typeName(left.getName())
-                            .typeKind(TypeKind.getTypeKind(left))
-                            .fieldName(rightField.getName())
-                            .reasonMsg("The new API has made the new input field '%s' non null and hence more strict for old consumers", rightField.getName())
+                            .typeName(old.getName())
+                            .typeKind(getTypeKind(old))
+                            .fieldName(newField.getName())
+                            .reasonMsg("The new API has made the new input field '%s' non null and hence more strict for old consumers", newField.getName())
                             .build());
                 }
             }
         }
     }
 
-    private void checkEnumType(EnumTypeDefinition left, EnumTypeDefinition right) {
-        Map<String, EnumValueDefinition> leftDefinitionMap = sortedMap(left.getEnumValueDefinitions(), EnumValueDefinition::getName);
-        Map<String, EnumValueDefinition> rightDefinitionMap = sortedMap(right.getEnumValueDefinitions(), EnumValueDefinition::getName);
+    private void checkEnumType(EnumTypeDefinition oldDef, EnumTypeDefinition newDef) {
+        Map<String, EnumValueDefinition> oldDefinitionMap = sortedMap(oldDef.getEnumValueDefinitions(), EnumValueDefinition::getName);
+        Map<String, EnumValueDefinition> newDefinitionMap = sortedMap(newDef.getEnumValueDefinitions(), EnumValueDefinition::getName);
 
-        for (String enumName : leftDefinitionMap.keySet()) {
-            EnumValueDefinition leftEnum = leftDefinitionMap.get(enumName);
-            Optional<EnumValueDefinition> rightEnum = Optional.ofNullable(rightDefinitionMap.get(enumName));
+        for (String enumName : oldDefinitionMap.keySet()) {
+            EnumValueDefinition oldEnum = oldDefinitionMap.get(enumName);
+            Optional<EnumValueDefinition> newEnum = Optional.ofNullable(newDefinitionMap.get(enumName));
 
-            if (!rightEnum.isPresent()) {
+            if (!newEnum.isPresent()) {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
-                        .typeName(left.getName())
-                        .typeKind(TypeKind.getTypeKind(left))
-                        .reasonMsg("The new API is missing an enum value '%s'", leftEnum.getName())
-                        .build());
-            }
-
-            checkDirectives(left, leftEnum.getDirectives(), rightEnum.get().getDirectives());
-        }
-        checkDirectives(left, right);
-    }
-
-    private void checkScalarType(ScalarTypeDefinition left, ScalarTypeDefinition right) {
-        checkDirectives(left, right);
-    }
-
-    private void checkImplements(CallContext callContext, ObjectTypeDefinition left, List<Type> leftImplements, List<Type> rightImplements) {
-        Map<String, Type> leftImplementsMap = sortedMap(leftImplements, t -> ((TypeName) t).getName());
-        Map<String, Type> rightImplementsMap = sortedMap(rightImplements, t -> ((TypeName) t).getName());
-
-        for (Map.Entry<String, Type> entry : leftImplementsMap.entrySet()) {
-            InterfaceTypeDefinition leftInterface = callContext.getLeftTypeDef(entry.getValue(), InterfaceTypeDefinition.class).get();
-            Optional<InterfaceTypeDefinition> rightInterface = callContext.getRightTypeDef(rightImplementsMap.get(entry.getKey()), InterfaceTypeDefinition.class);
-            if (!rightInterface.isPresent()) {
-                differenceReporter.report(apiBreakage()
-                        .category(MISSING)
-                        .typeName(left.getName())
-                        .typeKind(TypeKind.getTypeKind(left))
-                        .reasonMsg("The new API is missing the interface named '%s'", leftInterface.getName())
+                        .typeName(oldDef.getName())
+                        .typeKind(getTypeKind(oldDef))
+                        .components(oldEnum.getName())
+                        .reasonMsg("The new API is missing an enum value '%s'", oldEnum.getName())
                         .build());
             } else {
-                checkInterfaceType(callContext, leftInterface, rightInterface.get());
+                checkDirectives(oldDef, oldEnum.getDirectives(), newEnum.get().getDirectives());
+            }
+        }
+        checkDirectives(oldDef, newDef);
+    }
+
+    private void checkScalarType(ScalarTypeDefinition oldDef, ScalarTypeDefinition newDef) {
+        checkDirectives(oldDef, newDef);
+    }
+
+    private void checkImplements(CallContext callContext, ObjectTypeDefinition old, List<Type> oldImplements, List<Type> newImplements) {
+        Map<String, Type> oldImplementsMap = sortedMap(oldImplements, t -> ((TypeName) t).getName());
+        Map<String, Type> newImplementsMap = sortedMap(newImplements, t -> ((TypeName) t).getName());
+
+        for (Map.Entry<String, Type> entry : oldImplementsMap.entrySet()) {
+            InterfaceTypeDefinition oldInterface = callContext.getOldTypeDef(entry.getValue(), InterfaceTypeDefinition.class).get();
+            Optional<InterfaceTypeDefinition> newInterface = callContext.getNewTypeDef(newImplementsMap.get(entry.getKey()), InterfaceTypeDefinition.class);
+            if (!newInterface.isPresent()) {
+                differenceReporter.report(apiBreakage()
+                        .category(MISSING)
+                        .typeName(old.getName())
+                        .typeKind(getTypeKind(old))
+                        .components(oldInterface.getName())
+                        .reasonMsg("The new API is missing the interface named '%s'", oldInterface.getName())
+                        .build());
+            } else {
+                checkInterfaceType(callContext, oldInterface, newInterface.get());
             }
         }
     }
 
 
-    private void checkFields(CallContext callContext, TypeDefinition leftDef, Map<String, FieldDefinition> leftFields, Map<String, FieldDefinition> rightFields) {
-        for (Map.Entry<String, FieldDefinition> entry : leftFields.entrySet()) {
+    private void checkFields(CallContext callContext, TypeDefinition oldDef, Map<String, FieldDefinition> oldFields, Map<String, FieldDefinition> newFields) {
+        for (Map.Entry<String, FieldDefinition> entry : oldFields.entrySet()) {
 
             String fieldName = entry.getKey();
             differenceReporter.report(newInfo()
-                    .typeName(leftDef.getName())
-                    .typeKind(TypeKind.getTypeKind(leftDef))
+                    .typeName(oldDef.getName())
+                    .typeKind(getTypeKind(oldDef))
                     .fieldName(fieldName)
                     .reasonMsg("\tfield '%s' ...", fieldName)
                     .build());
 
 
-            FieldDefinition rightField = rightFields.get(fieldName);
-            if (rightField == null) {
+            FieldDefinition newField = newFields.get(fieldName);
+            if (newField == null) {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
-                        .typeName(leftDef.getName())
-                        .typeKind(TypeKind.getTypeKind(leftDef))
+                        .typeName(oldDef.getName())
+                        .typeKind(getTypeKind(oldDef))
                         .fieldName(fieldName)
                         .reasonMsg("The new API is missing the field '%s'", fieldName)
                         .build());
             } else {
-                checkField(callContext, leftDef, entry.getValue(), rightField);
+                checkField(callContext, oldDef, entry.getValue(), newField);
             }
         }
     }
 
 
-    private void checkField(CallContext callContext, TypeDefinition left, FieldDefinition leftField, FieldDefinition rightField) {
-        Type leftFieldType = leftField.getType();
-        Type rightFieldType = rightField.getType();
+    private void checkField(CallContext callContext, TypeDefinition old, FieldDefinition oldField, FieldDefinition newField) {
+        Type oldFieldType = oldField.getType();
+        Type newFieldType = newField.getType();
 
-        DifferenceEvent.Category category = checkTypeWithNonNullAndList(leftFieldType, rightFieldType);
+        DifferenceEvent.Category category = checkTypeWithNonNullAndList(oldFieldType, newFieldType);
         if (category != null) {
             differenceReporter.report(apiBreakage()
                     .category(category)
-                    .typeName(left.getName())
-                    .typeKind(TypeKind.getTypeKind(left))
-                    .fieldName(leftField.getName())
-                    .reasonMsg("The new API has changed field '%s' from type '%s' to '%s'", leftField.getName(), getAstDesc(leftFieldType), getAstDesc(rightFieldType))
+                    .typeName(old.getName())
+                    .typeKind(getTypeKind(old))
+                    .fieldName(oldField.getName())
+                    .components(getAstDesc(oldFieldType), getAstDesc(newFieldType))
+                    .reasonMsg("The new API has changed field '%s' from type '%s' to '%s'", oldField.getName(), getAstDesc(oldFieldType), getAstDesc(newFieldType))
                     .build());
         }
 
-        checkFieldArguments(callContext, left, leftField, leftField.getInputValueDefinitions(), rightField.getInputValueDefinitions());
+        checkFieldArguments(callContext, old, oldField, oldField.getInputValueDefinitions(), newField.getInputValueDefinitions());
 
-        checkDirectives(left, leftField.getDirectives(), rightField.getDirectives());
+        checkDirectives(old, oldField.getDirectives(), newField.getDirectives());
         //
         // and down we go again recursively via fields
         //
-        checkType(callContext, leftFieldType, rightFieldType);
+        checkType(callContext, oldFieldType, newFieldType);
     }
 
-    private void checkFieldArguments(CallContext callContext, TypeDefinition leftDef, FieldDefinition leftField, List<InputValueDefinition> leftInputValueDefinitions, List<InputValueDefinition> rightInputValueDefinitions) {
-        Map<String, InputValueDefinition> leftArgsMap = sortedMap(leftInputValueDefinitions, InputValueDefinition::getName);
-        Map<String, InputValueDefinition> rightArgMap = sortedMap(rightInputValueDefinitions, InputValueDefinition::getName);
+    private void checkFieldArguments(CallContext callContext, TypeDefinition oldDef, FieldDefinition oldField, List<InputValueDefinition> oldInputValueDefinitions, List<InputValueDefinition> newInputValueDefinitions) {
+        Map<String, InputValueDefinition> oldArgsMap = sortedMap(oldInputValueDefinitions, InputValueDefinition::getName);
+        Map<String, InputValueDefinition> newArgMap = sortedMap(newInputValueDefinitions, InputValueDefinition::getName);
 
-        if (leftArgsMap.size() > rightArgMap.size()) {
+        if (oldArgsMap.size() > newArgMap.size()) {
             differenceReporter.report(apiBreakage()
                     .category(MISSING)
-                    .typeName(leftDef.getName())
-                    .typeKind(TypeKind.getTypeKind(leftDef))
-                    .fieldName(leftField.getName())
-                    .reasonMsg("The new API has less arguments on field '%s' of type '%s' than the old API", leftField.getName(), leftDef.getName())
+                    .typeName(oldDef.getName())
+                    .typeKind(getTypeKind(oldDef))
+                    .fieldName(oldField.getName())
+                    .reasonMsg("The new API has less arguments on field '%s' of type '%s' than the old API", oldField.getName(), oldDef.getName())
                     .build());
             return;
         }
 
-        for (Map.Entry<String, InputValueDefinition> entry : leftArgsMap.entrySet()) {
+        for (Map.Entry<String, InputValueDefinition> entry : oldArgsMap.entrySet()) {
 
             String argName = entry.getKey();
             differenceReporter.report(newInfo()
-                    .typeName(leftDef.getName())
-                    .typeKind(TypeKind.getTypeKind(leftDef))
-                    .fieldName(leftField.getName())
+                    .typeName(oldDef.getName())
+                    .typeKind(getTypeKind(oldDef))
+                    .fieldName(oldField.getName())
                     .reasonMsg("\tfield argument '%s' ...", argName)
                     .build());
 
 
-            InputValueDefinition rightArg = rightArgMap.get(argName);
-            if (rightArg == null) {
+            InputValueDefinition newArg = newArgMap.get(argName);
+            if (newArg == null) {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
-                        .typeName(leftDef.getName())
-                        .typeKind(TypeKind.getTypeKind(leftDef))
-                        .fieldName(leftField.getName())
+                        .typeName(oldDef.getName())
+                        .typeKind(getTypeKind(oldDef))
+                        .fieldName(oldField.getName())
+                        .components(argName)
                         .reasonMsg("The new API is missing the field argument '%s'", argName)
                         .build());
             } else {
-                checkFieldArg(callContext, leftDef, leftField, entry.getValue(), rightArg);
+                checkFieldArg(callContext, oldDef, oldField, entry.getValue(), newArg);
             }
         }
 
         // check new fields are not mandatory
-        for (Map.Entry<String, InputValueDefinition> entry : rightArgMap.entrySet()) {
-            InputValueDefinition rightArg = entry.getValue();
-            Optional<InputValueDefinition> leftArg = Optional.ofNullable(leftArgsMap.get(rightArg.getName()));
+        for (Map.Entry<String, InputValueDefinition> entry : newArgMap.entrySet()) {
+            InputValueDefinition newArg = entry.getValue();
+            Optional<InputValueDefinition> oldArg = Optional.ofNullable(oldArgsMap.get(newArg.getName()));
 
-            if (!leftArg.isPresent()) {
+            if (!oldArg.isPresent()) {
                 // new args MUST not be mandatory
-                if (typeInfo(rightArg.getType()).isNonNull()) {
+                if (typeInfo(newArg.getType()).isNonNull()) {
                     differenceReporter.report(apiBreakage()
                             .category(STRICTER)
-                            .typeName(leftDef.getName())
-                            .typeKind(TypeKind.getTypeKind(leftDef))
-                            .fieldName(leftField.getName())
-                            .reasonMsg("The new API has made the new argument '%s' on field '%s' non null and hence more strict for old consumers", rightArg.getName(), leftField.getName())
+                            .typeName(oldDef.getName())
+                            .typeKind(getTypeKind(oldDef))
+                            .fieldName(oldField.getName())
+                            .components(newArg.getName())
+                            .reasonMsg("The new API has made the new argument '%s' on field '%s' non null and hence more strict for old consumers", newArg.getName(), oldField.getName())
                             .build());
                 }
             }
@@ -544,106 +556,112 @@ public class SchemaDiff {
 
     }
 
-    private void checkFieldArg(CallContext callContext, TypeDefinition leftDef, FieldDefinition leftField, InputValueDefinition leftArg, InputValueDefinition rightArg) {
+    private void checkFieldArg(CallContext callContext, TypeDefinition oldDef, FieldDefinition oldField, InputValueDefinition oldArg, InputValueDefinition newArg) {
 
-        Type leftArgType = leftArg.getType();
-        Type rightArgType = rightArg.getType();
+        Type oldArgType = oldArg.getType();
+        Type newArgType = newArg.getType();
 
-        DifferenceEvent.Category category = checkTypeWithNonNullAndList(leftArgType, rightArgType);
+        DifferenceEvent.Category category = checkTypeWithNonNullAndList(oldArgType, newArgType);
         if (category != null) {
             differenceReporter.report(apiBreakage()
                     .category(category)
-                    .typeName(leftDef.getName())
-                    .typeKind(TypeKind.getTypeKind(leftDef))
-                    .fieldName(leftField.getName())
-                    .reasonMsg("The new API has changed field '%s' argument '%s' from type '%s' to '%s'", leftField.getName(), leftArg.getName(), getAstDesc(leftArgType), getAstDesc(rightArgType))
+                    .typeName(oldDef.getName())
+                    .typeKind(getTypeKind(oldDef))
+                    .fieldName(oldField.getName())
+                    .components(getAstDesc(oldArgType), getAstDesc(newArgType))
+                    .reasonMsg("The new API has changed field '%s' argument '%s' from type '%s' to '%s'", oldField.getName(), oldArg.getName(), getAstDesc(oldArgType), getAstDesc(newArgType))
                     .build());
         } else {
             //
             // and down we go again recursively via arg types
             //
-            checkType(callContext, leftArgType, rightArgType);
+            checkType(callContext, oldArgType, newArgType);
         }
 
-        Value leftValue = leftArg.getDefaultValue();
-        Value rightValue = rightArg.getDefaultValue();
-        if (leftValue != null && rightValue != null) {
-            if (!leftValue.getClass().equals(rightValue.getClass())) {
+        Value oldValue = oldArg.getDefaultValue();
+        Value newValue = newArg.getDefaultValue();
+        if (oldValue != null && newValue != null) {
+            if (!oldValue.getClass().equals(newValue.getClass())) {
                 differenceReporter.report(apiBreakage()
                         .category(INVALID)
-                        .typeName(leftDef.getName())
-                        .typeKind(TypeKind.getTypeKind(leftDef))
-                        .fieldName(leftField.getName())
-                        .reasonMsg("The new API has changed default value types on argument named '%s' on field '%s' of type '%s", leftArg.getName(), leftField.getName(), leftDef.getName())
+                        .typeName(oldDef.getName())
+                        .typeKind(getTypeKind(oldDef))
+                        .fieldName(oldField.getName())
+                        .components(oldArg.getName())
+                        .reasonMsg("The new API has changed default value types on argument named '%s' on field '%s' of type '%s", oldArg.getName(), oldField.getName(), oldDef.getName())
                         .build());
             }
         }
 
-        checkDirectives(leftDef, leftArg.getDirectives(), rightArg.getDirectives());
+        checkDirectives(oldDef, oldArg.getDirectives(), newArg.getDirectives());
     }
 
-    private void checkDirectives(TypeDefinition left, TypeDefinition right) {
-        List<Directive> leftDirectives = left.getDirectives();
-        List<Directive> rightDirectives = right.getDirectives();
+    private void checkDirectives(TypeDefinition oldDef, TypeDefinition newDef) {
+        List<Directive> oldDirectives = oldDef.getDirectives();
+        List<Directive> newDirectives = newDef.getDirectives();
 
-        checkDirectives(left, leftDirectives, rightDirectives);
+        checkDirectives(oldDef, oldDirectives, newDirectives);
     }
 
-    void checkDirectives(TypeDefinition left, List<Directive> leftDirectives, List<Directive> rightDirectives) {
+    void checkDirectives(TypeDefinition old, List<Directive> oldDirectives, List<Directive> newDirectives) {
         if (!options.enforceDirectives) {
             return;
         }
 
-        Map<String, Directive> leftDirectivesMap = sortedMap(leftDirectives, Directive::getName);
-        Map<String, Directive> rightDirectivesMap = sortedMap(rightDirectives, Directive::getName);
+        Map<String, Directive> oldDirectivesMap = sortedMap(oldDirectives, Directive::getName);
+        Map<String, Directive> newDirectivesMap = sortedMap(newDirectives, Directive::getName);
 
-        for (String directiveName : leftDirectivesMap.keySet()) {
-            Directive leftDirective = leftDirectivesMap.get(directiveName);
-            Optional<Directive> rightDirective = Optional.ofNullable(rightDirectivesMap.get(directiveName));
-            if (!rightDirective.isPresent()) {
+        for (String directiveName : oldDirectivesMap.keySet()) {
+            Directive oldDirective = oldDirectivesMap.get(directiveName);
+            Optional<Directive> newDirective = Optional.ofNullable(newDirectivesMap.get(directiveName));
+            if (!newDirective.isPresent()) {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
-                        .typeName(left.getName())
-                        .typeKind(TypeKind.getTypeKind(left))
+                        .typeName(old.getName())
+                        .typeKind(getTypeKind(old))
+                        .components(directiveName)
                         .reasonMsg("The new API does not have a directive named '%s", directiveName)
                         .build());
                 continue;
             }
 
 
-            Map<String, Argument> leftArgumentsByName = new TreeMap<>(leftDirective.getArgumentsByName());
-            Map<String, Argument> rightArgumentsByName = new TreeMap<>(rightDirective.get().getArgumentsByName());
+            Map<String, Argument> oldArgumentsByName = new TreeMap<>(oldDirective.getArgumentsByName());
+            Map<String, Argument> newArgumentsByName = new TreeMap<>(newDirective.get().getArgumentsByName());
 
-            if (leftArgumentsByName.size() > rightArgumentsByName.size()) {
+            if (oldArgumentsByName.size() > newArgumentsByName.size()) {
                 differenceReporter.report(apiBreakage()
                         .category(MISSING)
-                        .typeName(left.getName())
-                        .typeKind(TypeKind.getTypeKind(left))
+                        .typeName(old.getName())
+                        .typeKind(getTypeKind(old))
+                        .components(directiveName)
                         .reasonMsg("The new API has less arguments on directive '%s' than the old API", directiveName)
                         .build());
                 return;
             }
 
-            for (String argName : leftArgumentsByName.keySet()) {
-                Argument leftArgument = leftArgumentsByName.get(argName);
-                Optional<Argument> rightArgument = Optional.ofNullable(rightArgumentsByName.get(argName));
+            for (String argName : oldArgumentsByName.keySet()) {
+                Argument oldArgument = oldArgumentsByName.get(argName);
+                Optional<Argument> newArgument = Optional.ofNullable(newArgumentsByName.get(argName));
 
-                if (!rightArgument.isPresent()) {
+                if (!newArgument.isPresent()) {
                     differenceReporter.report(apiBreakage()
                             .category(MISSING)
-                            .typeName(left.getName())
-                            .typeKind(TypeKind.getTypeKind(left))
+                            .typeName(old.getName())
+                            .typeKind(getTypeKind(old))
+                            .components(directiveName, argName)
                             .reasonMsg("The new API does not have an argument named '%s' on directive '%s", argName, directiveName)
                             .build());
                 } else {
-                    Value leftValue = leftArgument.getValue();
-                    Value rightValue = rightArgument.get().getValue();
-                    if (leftValue != null && rightValue != null) {
-                        if (!leftValue.getClass().equals(rightValue.getClass())) {
+                    Value oldValue = oldArgument.getValue();
+                    Value newValue = newArgument.get().getValue();
+                    if (oldValue != null && newValue != null) {
+                        if (!oldValue.getClass().equals(newValue.getClass())) {
                             differenceReporter.report(apiBreakage()
                                     .category(INVALID)
-                                    .typeName(left.getName())
-                                    .typeKind(TypeKind.getTypeKind(left))
+                                    .typeName(old.getName())
+                                    .typeKind(getTypeKind(old))
+                                    .components(directiveName, argName)
                                     .reasonMsg("The new API has changed value types on argument named '%s' on directive '%s", argName, directiveName)
                                     .build());
                         }
@@ -653,38 +671,38 @@ public class SchemaDiff {
         }
     }
 
-    DifferenceEvent.Category checkTypeWithNonNullAndList(Type leftType, Type rightType) {
-        TypeInfo leftTypeInfo = typeInfo(leftType);
-        TypeInfo rightTypeInfo = typeInfo(rightType);
+    DifferenceEvent.Category checkTypeWithNonNullAndList(Type oldType, Type newType) {
+        TypeInfo oldTypeInfo = typeInfo(oldType);
+        TypeInfo newTypeInfo = typeInfo(newType);
 
-        if (!leftTypeInfo.getName().equals(rightTypeInfo.getName())) {
+        if (!oldTypeInfo.getName().equals(newTypeInfo.getName())) {
             return INVALID;
         }
 
         while (true) {
             //
             // its allowed to get more less strict in the new but not more strict
-            if (leftTypeInfo.isNonNull() && rightTypeInfo.isNonNull()) {
-                leftTypeInfo = leftTypeInfo.unwrapOne();
-                rightTypeInfo = rightTypeInfo.unwrapOne();
-            } else if (leftTypeInfo.isNonNull() && !rightTypeInfo.isNonNull()) {
-                leftTypeInfo = leftTypeInfo.unwrapOne();
-            } else if (!leftTypeInfo.isNonNull() && rightTypeInfo.isNonNull()) {
+            if (oldTypeInfo.isNonNull() && newTypeInfo.isNonNull()) {
+                oldTypeInfo = oldTypeInfo.unwrapOne();
+                newTypeInfo = newTypeInfo.unwrapOne();
+            } else if (oldTypeInfo.isNonNull() && !newTypeInfo.isNonNull()) {
+                oldTypeInfo = oldTypeInfo.unwrapOne();
+            } else if (!oldTypeInfo.isNonNull() && newTypeInfo.isNonNull()) {
                 return STRICTER;
             }
             // lists
-            if (leftTypeInfo.isList() && !rightTypeInfo.isList()) {
+            if (oldTypeInfo.isList() && !newTypeInfo.isList()) {
                 return INVALID;
             }
             // plain
-            if (leftTypeInfo.isPlain()) {
-                if (!rightTypeInfo.isPlain()) {
+            if (oldTypeInfo.isPlain()) {
+                if (!newTypeInfo.isPlain()) {
                     return INVALID;
                 }
                 break;
             }
-            leftTypeInfo = leftTypeInfo.unwrapOne();
-            rightTypeInfo = rightTypeInfo.unwrapOne();
+            oldTypeInfo = oldTypeInfo.unwrapOne();
+            newTypeInfo = newTypeInfo.unwrapOne();
         }
         return null;
     }
@@ -735,5 +753,4 @@ public class SchemaDiff {
             return name;
         }
     }
-
 }

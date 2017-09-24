@@ -1,5 +1,11 @@
 package com.graphql.diff.reporting;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import static java.util.stream.Collectors.toList;
+
 public class DifferenceEvent {
 
     public enum Level {
@@ -17,14 +23,16 @@ public class DifferenceEvent {
     private final String fieldName;
     private final TypeKind typeOfType;
     private final String reasonMsg;
+    private final List<String> components;
 
-    DifferenceEvent(Level level, Category category, String typeName, String fieldName, TypeKind typeOfType, String reasonMsg) {
+    DifferenceEvent(Level level, Category category, String typeName, String fieldName, TypeKind typeOfType, String reasonMsg, List<String> components) {
         this.level = level;
         this.category = category;
         this.typeName = typeName;
         this.fieldName = fieldName;
         this.typeOfType = typeOfType;
         this.reasonMsg = reasonMsg;
+        this.components = components;
     }
 
     public String getTypeName() {
@@ -49,6 +57,10 @@ public class DifferenceEvent {
 
     public Category getCategory() {
         return category;
+    }
+
+    public List<String> getComponents() {
+        return new ArrayList<>(components);
     }
 
     @Override
@@ -84,6 +96,7 @@ public class DifferenceEvent {
         TypeKind typeOfType;
         String reasonMsg;
         String fieldName;
+        List<String> components = new ArrayList<>();
 
         public Builder level(Level level) {
             this.level = level;
@@ -116,8 +129,13 @@ public class DifferenceEvent {
             return this;
         }
 
+        public Builder components(Object... args) {
+            components.addAll(Arrays.stream(args).map(String::valueOf).collect(toList()));
+            return this;
+        }
+
         public DifferenceEvent build() {
-            return new DifferenceEvent(level, category, typeName, fieldName, typeOfType, reasonMsg);
+            return new DifferenceEvent(level, category, typeName, fieldName, typeOfType, reasonMsg, components);
         }
 
 

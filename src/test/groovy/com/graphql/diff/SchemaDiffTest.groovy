@@ -250,10 +250,33 @@ class SchemaDiffTest extends Specification {
         diff.diffSchema(diffSet)
 
         expect:
-        reporter.errorCount == 1
+        reporter.errorCount == 2
+
         reporter.errors[0].category == MISSING
         reporter.errors[0].typeOfType == TypeKind.Object
-        reporter.errors[0].fieldName == 'sword'
+        reporter.errors[0].typeName == "Mutation"
+        reporter.errors[0].fieldName == 'being'
+        reporter.errors[0].components.contains("questor")
+
+        reporter.errors[1].category == MISSING
+        reporter.errors[1].typeOfType == TypeKind.Object
+        reporter.errors[0].typeName == "Mutation"
+        reporter.errors[1].fieldName == 'sword'
+
+    }
+
+    def "missing enum value"() {
+        DiffSet diffSet = diffSet("schema_missing_enum_value.graphqls")
+
+        def diff = new SchemaDiff(reporter)
+        diff.diffSchema(diffSet)
+
+        expect:
+        reporter.errorCount == 1
+        reporter.errors[0].category == MISSING
+        reporter.errors[0].typeOfType == TypeKind.Enum
+        reporter.errors[0].typeName == 'Temperament'
+        reporter.errors[0].components.contains("Duplicitous")
 
     }
 

@@ -6,19 +6,19 @@ import java.util.Map;
  */
 public class DiffSet {
 
-    private final Map<String, Object> introspectionLeft;
-    private final Map<String, Object> introspectionRight;
+    private final Map<String, Object> introspectionOld;
+    private final Map<String, Object> introspectionNew;
 
-    public DiffSet(Map<String, Object> introspectionLeft, Map<String, Object> introspectionRight) {
-        this.introspectionLeft = introspectionLeft;
-        this.introspectionRight = introspectionRight;
+    public DiffSet(Map<String, Object> introspectionOld, Map<String, Object> introspectionNew) {
+        this.introspectionOld = introspectionOld;
+        this.introspectionNew = introspectionNew;
     }
 
-    public Map<String, Object> getLeft() {
-        return introspectionLeft;
+    public Map<String, Object> getOld() {
+        return introspectionOld;
     }
 
-    public Map<String, Object> getRight() {
-        return introspectionRight;
+    public Map<String, Object> getNew() {
+        return introspectionNew;
     }
 }

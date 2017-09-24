@@ -17,10 +17,8 @@ type Query {
 }
 
 type Mutation {
-    #being(questor : Questor) : Query
-    being(questorThing : Questor) : Query
-    #sword(bearer : Questor, name : String, alloy : String, temperament : Temperament) : String
-    sword(bearer : Questor, name : String, alloy : String) : String
+    being(questor : Questor) : Query
+    sword(bearer : Questor, name : String, alloy : String, temperament : Temperament) : String
 }
 
 input Questor {
@@ -70,7 +68,7 @@ union Character = Ainur | Istari | Deity
 
 enum Temperament {
     Hero
-    Duplicitous
+    #Duplicitous
     Evil
 }
 
