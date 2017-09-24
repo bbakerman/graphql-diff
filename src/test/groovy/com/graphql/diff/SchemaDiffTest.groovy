@@ -16,8 +16,6 @@ import spock.lang.Specification
 import static com.graphql.diff.reporting.DifferenceEvent.Category.INVALID
 import static com.graphql.diff.reporting.DifferenceEvent.Category.MISSING
 import static com.graphql.diff.reporting.DifferenceEvent.Category.STRICTER
-import static com.graphql.diff.reporting.TypeKind.Interface
-import static com.graphql.diff.reporting.TypeKind.Union
 
 class SchemaDiffTest extends Specification {
     private CapturingReporter reporter
@@ -158,10 +156,10 @@ class SchemaDiffTest extends Specification {
         expect:
         reporter.errorCount == 2 // 2 fields removed
         reporter.errors[0].category == MISSING
-        reporter.errors[0].typeOfType == Interface
+        reporter.errors[0].typeOfType == TypeKind.Interface
 
         reporter.errors[1].category == MISSING
-        reporter.errors[1].typeOfType == Interface
+        reporter.errors[1].typeOfType == TypeKind.Interface
     }
 
     def "missing members on union"() {
@@ -173,7 +171,7 @@ class SchemaDiffTest extends Specification {
         expect:
         reporter.errorCount == 1 // 1 member removed
         reporter.errors[0].category == MISSING
-        reporter.errors[0].typeOfType == Union
+        reporter.errors[0].typeOfType == TypeKind.Union
 
     }
 
@@ -240,6 +238,20 @@ class SchemaDiffTest extends Specification {
         reporter.errors[1].typeName == 'Questor'
         reporter.errors[1].typeOfType == TypeKind.InputObject
         reporter.errors[1].fieldName == 'newMandatoryField'
+
+    }
+
+    def "changed type kind"() {
+        DiffSet diffSet = diffSet("schema_changed_type_kind.graphqls")
+
+        def diff = new SchemaDiff(reporter)
+        diff.diffSchema(diffSet)
+
+        expect:
+        reporter.errorCount == 1
+        reporter.errors[0].category == INVALID
+        reporter.errors[0].typeName == 'Character'
+        reporter.errors[0].typeOfType == TypeKind.Union
 
     }
 
