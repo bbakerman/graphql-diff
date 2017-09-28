@@ -1,9 +1,12 @@
-package com.graphql.diff.reporting;
+package com.graphql.diff;
+
+import graphql.PublicApi;
 
 /**
  * A classification of difference events.
  */
-public enum DifferenceCategory {
+@PublicApi
+public enum DiffCategory {
     /**
      * The new API is missing something
      */

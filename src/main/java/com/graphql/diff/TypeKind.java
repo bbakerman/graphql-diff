@@ -1,5 +1,7 @@
-package com.graphql.diff.reporting;
+package com.graphql.diff;
 
+import graphql.Internal;
+import graphql.PublicApi;
 import graphql.language.EnumTypeDefinition;
 import graphql.language.InputObjectTypeDefinition;
 import graphql.language.InterfaceTypeDefinition;
@@ -11,6 +13,7 @@ import graphql.language.UnionTypeDefinition;
 /**
  * The kind of things that can be in a graphql type system
  */
+@PublicApi
 public enum TypeKind {
 
     Operation, Object, Interface, Union, Enum, Scalar, InputObject, Unknown;

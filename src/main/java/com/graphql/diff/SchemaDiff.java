@@ -1,10 +1,6 @@
 package com.graphql.diff;
 
-import com.graphql.diff.reporting.DifferenceCategory;
-import com.graphql.diff.reporting.DifferenceEvent;
-import com.graphql.diff.reporting.DifferenceLevel;
 import com.graphql.diff.reporting.DifferenceReporter;
-import com.graphql.diff.reporting.TypeKind;
 import com.graphql.diff.util.TypeInfo;
 import graphql.introspection.IntrospectionResultToSchema;
 import graphql.language.Argument;
@@ -26,26 +22,25 @@ import graphql.language.TypeName;
 import graphql.language.UnionTypeDefinition;
 import graphql.language.Value;
 
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.Stack;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static com.graphql.diff.reporting.DifferenceCategory.ADDITION;
-import static com.graphql.diff.reporting.DifferenceCategory.DIFFERENT;
-import static com.graphql.diff.reporting.DifferenceCategory.INVALID;
-import static com.graphql.diff.reporting.DifferenceCategory.MISSING;
-import static com.graphql.diff.reporting.DifferenceCategory.STRICTER;
-import static com.graphql.diff.reporting.DifferenceEvent.apiBreakage;
-import static com.graphql.diff.reporting.DifferenceEvent.apiDanger;
-import static com.graphql.diff.reporting.DifferenceEvent.newInfo;
-import static com.graphql.diff.reporting.TypeKind.getTypeKind;
+import static com.graphql.diff.DiffCategory.ADDITION;
+import static com.graphql.diff.DiffCategory.DIFFERENT;
+import static com.graphql.diff.DiffCategory.INVALID;
+import static com.graphql.diff.DiffCategory.MISSING;
+import static com.graphql.diff.DiffCategory.STRICTER;
+import static com.graphql.diff.DiffEvent.apiBreakage;
+import static com.graphql.diff.DiffEvent.apiDanger;
+import static com.graphql.diff.DiffEvent.newInfo;
+import static com.graphql.diff.TypeKind.getTypeKind;
 import static com.graphql.diff.util.TypeInfo.getAstDesc;
 import static com.graphql.diff.util.TypeInfo.typeInfo;
 
@@ -78,56 +73,6 @@ public class SchemaDiff {
 
     }
 
-    static class Ctx {
-        final List<String> examinedTypes = new ArrayList<>();
-        final Stack<String> currentTypes = new Stack<>();
-        private final DifferenceReporter reporter;
-        final Document oldDoc;
-        final Document newDoc;
-
-        Ctx(DifferenceReporter reporter, Document oldDoc, Document newDoc) {
-            this.reporter = reporter;
-            this.oldDoc = oldDoc;
-            this.newDoc = newDoc;
-        }
-
-        void report(DifferenceEvent differenceEvent) {
-            reporter.report(differenceEvent);
-        }
-
-        boolean examiningType(String typeName) {
-            if (examinedTypes.contains(typeName)) {
-                return true;
-            }
-            examinedTypes.add(typeName);
-            currentTypes.push(typeName);
-            return false;
-        }
-
-        void exitType() {
-            currentTypes.pop();
-        }
-
-        <T extends TypeDefinition> Optional<T> getOldTypeDef(Type type, Class<T> typeDefClass) {
-            return getType(getTypeName(type), typeDefClass, oldDoc);
-        }
-
-        <T extends TypeDefinition> Optional<T> getNewTypeDef(Type type, Class<T> typeDefClass) {
-            return getType(getTypeName(type), typeDefClass, newDoc);
-        }
-
-        private <T extends TypeDefinition> Optional<T> getType(String typeName, Class<T> typeDefClass, Document doc) {
-            if (typeName == null) {
-                return Optional.empty();
-            }
-            return doc.getDefinitions().stream()
-                    .filter(def -> typeDefClass.isAssignableFrom(def.getClass()))
-                    .map(typeDefClass::cast)
-                    .filter(defT -> defT.getName().equals(typeName))
-                    .findFirst();
-        }
-    }
-
     private class CountingReporter implements DifferenceReporter {
         final DifferenceReporter delegate;
         int breakingCount = 1;
@@ -137,8 +82,8 @@ public class SchemaDiff {
         }
 
         @Override
-        public void report(DifferenceEvent differenceEvent) {
-            if (differenceEvent.getLevel().equals(DifferenceLevel.BREAKING)) {
+        public void report(DiffEvent differenceEvent) {
+            if (differenceEvent.getLevel().equals(DiffLevel.BREAKING)) {
                 breakingCount++;
             }
             delegate.report(differenceEvent);
@@ -193,7 +138,7 @@ public class SchemaDiff {
         Document oldDoc = new IntrospectionResultToSchema().createSchemaDefinition(oldApi);
         Document newDoc = new IntrospectionResultToSchema().createSchemaDefinition(newApi);
 
-        Ctx ctx = new Ctx(reporter, oldDoc, newDoc);
+        DiffCtx ctx = new DiffCtx(reporter, oldDoc, newDoc);
 
         Optional<SchemaDefinition> oldSchemaDef = getSchemaDef(oldDoc);
         Optional<SchemaDefinition> newSchemaDef = getSchemaDef(newDoc);
@@ -207,7 +152,7 @@ public class SchemaDiff {
         reporter.onEnd();
     }
 
-    private void checkOperation(Ctx ctx, String opName, Optional<SchemaDefinition> oldSchemaDef, Optional<SchemaDefinition> newSchemaDef) {
+    private void checkOperation(DiffCtx ctx, String opName, Optional<SchemaDefinition> oldSchemaDef, Optional<SchemaDefinition> newSchemaDef) {
         // if schema declaration is missing then it is assumed to contain Query / Mutation / Subscription
         Optional<OperationTypeDefinition> oldOpTypeDef;
         oldOpTypeDef = oldSchemaDef
@@ -224,11 +169,17 @@ public class SchemaDiff {
             return;
         }
 
+        ctx.report(newInfo()
+                .typeName(capitalize(opName))
+                .typeKind(TypeKind.Operation)
+                .components(opName)
+                .reasonMsg("Examining operation '%s' ...", capitalize(opName))
+                .build());
+
         if (oldOpTypeDef.isPresent() && !newOpTypeDef.isPresent()) {
             ctx.report(apiBreakage()
                     .category(MISSING)
                     .typeName(capitalize(opName))
-                    .fieldName(opName)
                     .typeKind(TypeKind.Operation)
                     .components(opName)
                     .reasonMsg("The new API no longer has the operation '%s'", opName)
@@ -249,9 +200,10 @@ public class SchemaDiff {
         checkType(ctx, oldType, newOpTypeDefinition.getType());
     }
 
-    private void checkType(Ctx ctx, Type oldType, Type newType) {
+    private void checkType(DiffCtx ctx, Type oldType, Type newType) {
         String typeName = getTypeName(oldType);
 
+        // prevent circular references
         if (ctx.examiningType(typeName)) {
             return;
         }
@@ -348,7 +300,7 @@ public class SchemaDiff {
         return SYSTEM_SCALARS.contains(typeName);
     }
 
-    private void checkObjectType(Ctx ctx, ObjectTypeDefinition oldDef, ObjectTypeDefinition newDef) {
+    private void checkObjectType(DiffCtx ctx, ObjectTypeDefinition oldDef, ObjectTypeDefinition newDef) {
         Map<String, FieldDefinition> oldFields = sortedMap(oldDef.getFieldDefinitions(), FieldDefinition::getName);
         Map<String, FieldDefinition> newFields = sortedMap(newDef.getFieldDefinitions(), FieldDefinition::getName);
 
@@ -359,7 +311,7 @@ public class SchemaDiff {
         checkDirectives(ctx, oldDef, newDef);
     }
 
-    private void checkInterfaceType(Ctx ctx, InterfaceTypeDefinition oldDef, InterfaceTypeDefinition newDef) {
+    private void checkInterfaceType(DiffCtx ctx, InterfaceTypeDefinition oldDef, InterfaceTypeDefinition newDef) {
         Map<String, FieldDefinition> oldFields = sortedMap(oldDef.getFieldDefinitions(), FieldDefinition::getName);
         Map<String, FieldDefinition> newFields = sortedMap(newDef.getFieldDefinitions(), FieldDefinition::getName);
 
@@ -368,7 +320,7 @@ public class SchemaDiff {
         checkDirectives(ctx, oldDef, newDef);
     }
 
-    private void checkUnionType(Ctx ctx, UnionTypeDefinition oldDef, UnionTypeDefinition newDef) {
+    private void checkUnionType(DiffCtx ctx, UnionTypeDefinition oldDef, UnionTypeDefinition newDef) {
         Map<String, Type> oldMemberTypes = sortedMap(oldDef.getMemberTypes(), SchemaDiff::getTypeName);
         Map<String, Type> newMemberTypes = sortedMap(newDef.getMemberTypes(), SchemaDiff::getTypeName);
 
@@ -400,14 +352,14 @@ public class SchemaDiff {
     }
 
 
-    private void checkInputObjectType(Ctx ctx, InputObjectTypeDefinition oldDef, InputObjectTypeDefinition newDef) {
+    private void checkInputObjectType(DiffCtx ctx, InputObjectTypeDefinition oldDef, InputObjectTypeDefinition newDef) {
 
         checkInputFields(ctx, oldDef, oldDef.getInputValueDefinitions(), newDef.getInputValueDefinitions());
 
         checkDirectives(ctx, oldDef, newDef);
     }
 
-    private void checkInputFields(Ctx ctx, TypeDefinition old, List<InputValueDefinition> oldIVD, List<InputValueDefinition> newIVD) {
+    private void checkInputFields(DiffCtx ctx, TypeDefinition old, List<InputValueDefinition> oldIVD, List<InputValueDefinition> newIVD) {
         Map<String, InputValueDefinition> oldDefinitionMap = sortedMap(oldIVD, InputValueDefinition::getName);
         Map<String, InputValueDefinition> newDefinitionMap = sortedMap(newIVD, InputValueDefinition::getName);
 
@@ -415,16 +367,24 @@ public class SchemaDiff {
             InputValueDefinition oldField = oldDefinitionMap.get(inputFieldName);
             Optional<InputValueDefinition> newField = Optional.ofNullable(newDefinitionMap.get(inputFieldName));
 
+            ctx.report(newInfo()
+                    .typeName(old.getName())
+                    .typeKind(getTypeKind(old))
+                    .fieldName(oldField.getName())
+                    .reasonMsg("\tExamining input field '%s' ...", mkDotName(old.getName(), oldField.getName()))
+                    .build());
+
+
             if (!newField.isPresent()) {
                 ctx.report(apiBreakage()
                         .category(MISSING)
                         .typeName(old.getName())
                         .typeKind(getTypeKind(old))
                         .fieldName(oldField.getName())
-                        .reasonMsg("The new API is missing an input field '%s'", oldField.getName())
+                        .reasonMsg("The new API is missing an input field '%s'", mkDotName(old.getName(), oldField.getName()))
                         .build());
             } else {
-                DifferenceCategory category = checkTypeWithNonNullAndList(oldField.getType(), newField.get().getType());
+                DiffCategory category = checkTypeWithNonNullAndList(oldField.getType(), newField.get().getType());
                 if (category != null) {
                     ctx.report(apiBreakage()
                             .category(category)
@@ -459,7 +419,7 @@ public class SchemaDiff {
         }
     }
 
-    private void checkEnumType(Ctx ctx, EnumTypeDefinition oldDef, EnumTypeDefinition newDef) {
+    private void checkEnumType(DiffCtx ctx, EnumTypeDefinition oldDef, EnumTypeDefinition newDef) {
         Map<String, EnumValueDefinition> oldDefinitionMap = sortedMap(oldDef.getEnumValueDefinitions(), EnumValueDefinition::getName);
         Map<String, EnumValueDefinition> newDefinitionMap = sortedMap(newDef.getEnumValueDefinitions(), EnumValueDefinition::getName);
 
@@ -495,11 +455,11 @@ public class SchemaDiff {
         checkDirectives(ctx, oldDef, newDef);
     }
 
-    private void checkScalarType(Ctx ctx, ScalarTypeDefinition oldDef, ScalarTypeDefinition newDef) {
+    private void checkScalarType(DiffCtx ctx, ScalarTypeDefinition oldDef, ScalarTypeDefinition newDef) {
         checkDirectives(ctx, oldDef, newDef);
     }
 
-    private void checkImplements(Ctx ctx, ObjectTypeDefinition old, List<Type> oldImplements, List<Type> newImplements) {
+    private void checkImplements(DiffCtx ctx, ObjectTypeDefinition old, List<Type> oldImplements, List<Type> newImplements) {
         Map<String, Type> oldImplementsMap = sortedMap(oldImplements, t -> ((TypeName) t).getName());
         Map<String, Type> newImplementsMap = sortedMap(newImplements, t -> ((TypeName) t).getName());
 
@@ -521,7 +481,7 @@ public class SchemaDiff {
     }
 
 
-    private void checkFields(Ctx ctx, TypeDefinition oldDef, Map<String, FieldDefinition> oldFields, Map<String, FieldDefinition> newFields) {
+    private void checkFields(DiffCtx ctx, TypeDefinition oldDef, Map<String, FieldDefinition> oldFields, Map<String, FieldDefinition> newFields) {
         for (Map.Entry<String, FieldDefinition> entry : oldFields.entrySet()) {
 
             String fieldName = entry.getKey();
@@ -529,9 +489,8 @@ public class SchemaDiff {
                     .typeName(oldDef.getName())
                     .typeKind(getTypeKind(oldDef))
                     .fieldName(fieldName)
-                    .reasonMsg("\tfield '%s' ...", fieldName)
+                    .reasonMsg("\tExamining field '%s' ...", mkDotName(oldDef.getName(), fieldName))
                     .build());
-
 
             FieldDefinition newField = newFields.get(fieldName);
             if (newField == null) {
@@ -540,7 +499,7 @@ public class SchemaDiff {
                         .typeName(oldDef.getName())
                         .typeKind(getTypeKind(oldDef))
                         .fieldName(fieldName)
-                        .reasonMsg("The new API is missing the field '%s'", fieldName)
+                        .reasonMsg("The new API is missing the field '%s'", mkDotName(oldDef.getName(), fieldName))
                         .build());
             } else {
                 checkField(ctx, oldDef, entry.getValue(), newField);
@@ -549,11 +508,11 @@ public class SchemaDiff {
     }
 
 
-    private void checkField(Ctx ctx, TypeDefinition old, FieldDefinition oldField, FieldDefinition newField) {
+    private void checkField(DiffCtx ctx, TypeDefinition old, FieldDefinition oldField, FieldDefinition newField) {
         Type oldFieldType = oldField.getType();
         Type newFieldType = newField.getType();
 
-        DifferenceCategory category = checkTypeWithNonNullAndList(oldFieldType, newFieldType);
+        DiffCategory category = checkTypeWithNonNullAndList(oldFieldType, newFieldType);
         if (category != null) {
             ctx.report(apiBreakage()
                     .category(category)
@@ -561,7 +520,7 @@ public class SchemaDiff {
                     .typeKind(getTypeKind(old))
                     .fieldName(oldField.getName())
                     .components(getAstDesc(oldFieldType), getAstDesc(newFieldType))
-                    .reasonMsg("The new API has changed field '%s' from type '%s' to '%s'", oldField.getName(), getAstDesc(oldFieldType), getAstDesc(newFieldType))
+                    .reasonMsg("The new API has changed field '%s' from type '%s' to '%s'", mkDotName(old.getName(), oldField.getName()), getAstDesc(oldFieldType), getAstDesc(newFieldType))
                     .build());
         }
 
@@ -574,7 +533,7 @@ public class SchemaDiff {
         checkType(ctx, oldFieldType, newFieldType);
     }
 
-    private void checkFieldArguments(Ctx ctx, TypeDefinition oldDef, FieldDefinition oldField, List<InputValueDefinition> oldInputValueDefinitions, List<InputValueDefinition> newInputValueDefinitions) {
+    private void checkFieldArguments(DiffCtx ctx, TypeDefinition oldDef, FieldDefinition oldField, List<InputValueDefinition> oldInputValueDefinitions, List<InputValueDefinition> newInputValueDefinitions) {
         Map<String, InputValueDefinition> oldArgsMap = sortedMap(oldInputValueDefinitions, InputValueDefinition::getName);
         Map<String, InputValueDefinition> newArgMap = sortedMap(newInputValueDefinitions, InputValueDefinition::getName);
 
@@ -584,7 +543,7 @@ public class SchemaDiff {
                     .typeName(oldDef.getName())
                     .typeKind(getTypeKind(oldDef))
                     .fieldName(oldField.getName())
-                    .reasonMsg("The new API has less arguments on field '%s' of type '%s' than the old API", oldField.getName(), oldDef.getName())
+                    .reasonMsg("The new API has less arguments on field '%s' of type '%s' than the old API", mkDotName(oldDef.getName(), oldField.getName()), oldDef.getName())
                     .build());
             return;
         }
@@ -596,7 +555,7 @@ public class SchemaDiff {
                     .typeName(oldDef.getName())
                     .typeKind(getTypeKind(oldDef))
                     .fieldName(oldField.getName())
-                    .reasonMsg("\tfield argument '%s' ...", argName)
+                    .reasonMsg("\tExamining field argument '%s' ...", mkDotName(oldDef.getName(), oldField.getName(), argName))
                     .build());
 
 
@@ -608,7 +567,7 @@ public class SchemaDiff {
                         .typeKind(getTypeKind(oldDef))
                         .fieldName(oldField.getName())
                         .components(argName)
-                        .reasonMsg("The new API is missing the field argument '%s'", argName)
+                        .reasonMsg("The new API is missing the field argument '%s'", mkDotName(oldDef.getName(), oldField.getName(), argName))
                         .build());
             } else {
                 checkFieldArg(ctx, oldDef, oldField, entry.getValue(), newArg);
@@ -629,7 +588,7 @@ public class SchemaDiff {
                             .typeKind(getTypeKind(oldDef))
                             .fieldName(oldField.getName())
                             .components(newArg.getName())
-                            .reasonMsg("The new API has made the new argument '%s' on field '%s' non null and hence more strict for old consumers", newArg.getName(), oldField.getName())
+                            .reasonMsg("The new API has made the new argument '%s' on field '%s' non null and hence more strict for old consumers", newArg.getName(), mkDotName(oldDef.getName(), oldField.getName()))
                             .build());
                 }
             }
@@ -637,12 +596,12 @@ public class SchemaDiff {
 
     }
 
-    private void checkFieldArg(Ctx ctx, TypeDefinition oldDef, FieldDefinition oldField, InputValueDefinition oldArg, InputValueDefinition newArg) {
+    private void checkFieldArg(DiffCtx ctx, TypeDefinition oldDef, FieldDefinition oldField, InputValueDefinition oldArg, InputValueDefinition newArg) {
 
         Type oldArgType = oldArg.getType();
         Type newArgType = newArg.getType();
 
-        DifferenceCategory category = checkTypeWithNonNullAndList(oldArgType, newArgType);
+        DiffCategory category = checkTypeWithNonNullAndList(oldArgType, newArgType);
         if (category != null) {
             ctx.report(apiBreakage()
                     .category(category)
@@ -650,7 +609,7 @@ public class SchemaDiff {
                     .typeKind(getTypeKind(oldDef))
                     .fieldName(oldField.getName())
                     .components(getAstDesc(oldArgType), getAstDesc(newArgType))
-                    .reasonMsg("The new API has changed field '%s' argument '%s' from type '%s' to '%s'", oldField.getName(), oldArg.getName(), getAstDesc(oldArgType), getAstDesc(newArgType))
+                    .reasonMsg("The new API has changed field '%s' argument '%s' from type '%s' to '%s'", mkDotName(oldDef.getName(), oldField.getName()), oldArg.getName(), getAstDesc(oldArgType), getAstDesc(newArgType))
                     .build());
         } else {
             //
@@ -670,7 +629,7 @@ public class SchemaDiff {
                         .typeKind(getTypeKind(oldDef))
                         .fieldName(oldField.getName())
                         .components(oldArg.getName())
-                        .reasonMsg("The new API has changed default value types on argument named '%s' on field '%s' of type '%s", oldArg.getName(), oldField.getName(), oldDef.getName())
+                        .reasonMsg("The new API has changed default value types on argument named '%s' on field '%s' of type '%s", oldArg.getName(), mkDotName(oldDef.getName(), oldField.getName()), oldDef.getName())
                         .build());
             }
             if (!oldValue.isEqualTo(newValue)) {
@@ -690,21 +649,21 @@ public class SchemaDiff {
                     .typeKind(getTypeKind(oldDef))
                     .fieldName(oldField.getName())
                     .components(oldArg.getName())
-                    .reasonMsg("The new API has changed default value on argument named '%s' on field '%s' of type '%s", oldArg.getName(), oldField.getName(), oldDef.getName())
+                    .reasonMsg("The new API has changed default value on argument named '%s' on field '%s' of type '%s", oldArg.getName(), mkDotName(oldDef.getName(), oldField.getName()), oldDef.getName())
                     .build());
         }
 
         checkDirectives(ctx, oldDef, oldArg.getDirectives(), newArg.getDirectives());
     }
 
-    private void checkDirectives(Ctx ctx, TypeDefinition oldDef, TypeDefinition newDef) {
+    private void checkDirectives(DiffCtx ctx, TypeDefinition oldDef, TypeDefinition newDef) {
         List<Directive> oldDirectives = oldDef.getDirectives();
         List<Directive> newDirectives = newDef.getDirectives();
 
         checkDirectives(ctx, oldDef, oldDirectives, newDirectives);
     }
 
-    void checkDirectives(Ctx ctx, TypeDefinition old, List<Directive> oldDirectives, List<Directive> newDirectives) {
+    void checkDirectives(DiffCtx ctx, TypeDefinition old, List<Directive> oldDirectives, List<Directive> newDirectives) {
         if (!options.enforceDirectives) {
             return;
         }
@@ -721,7 +680,7 @@ public class SchemaDiff {
                         .typeName(old.getName())
                         .typeKind(getTypeKind(old))
                         .components(directiveName)
-                        .reasonMsg("The new API does not have a directive named '%s", directiveName)
+                        .reasonMsg("The new API does not have a directive named '%s' on type '%s'", directiveName, old.getName())
                         .build());
                 continue;
             }
@@ -736,7 +695,7 @@ public class SchemaDiff {
                         .typeName(old.getName())
                         .typeKind(getTypeKind(old))
                         .components(directiveName)
-                        .reasonMsg("The new API has less arguments on directive '%s' than the old API", directiveName)
+                        .reasonMsg("The new API has less arguments on directive '%s' on type '%s' than the old API", directiveName, old.getName())
                         .build());
                 return;
             }
@@ -751,7 +710,7 @@ public class SchemaDiff {
                             .typeName(old.getName())
                             .typeKind(getTypeKind(old))
                             .components(directiveName, argName)
-                            .reasonMsg("The new API does not have an argument named '%s' on directive '%s", argName, directiveName)
+                            .reasonMsg("The new API does not have an argument named '%s' on directive '%s' on type '%s'", argName, directiveName, old.getName())
                             .build());
                 } else {
                     Value oldValue = oldArgument.getValue();
@@ -763,7 +722,7 @@ public class SchemaDiff {
                                     .typeName(old.getName())
                                     .typeKind(getTypeKind(old))
                                     .components(directiveName, argName)
-                                    .reasonMsg("The new API has changed value types on argument named '%s' on directive '%s", argName, directiveName)
+                                    .reasonMsg("The new API has changed value types on argument named '%s' on directive '%s' on type '%s'", argName, directiveName, old.getName())
                                     .build());
                         }
                     }
@@ -772,7 +731,7 @@ public class SchemaDiff {
         }
     }
 
-    DifferenceCategory checkTypeWithNonNullAndList(Type oldType, Type newType) {
+    DiffCategory checkTypeWithNonNullAndList(Type oldType, Type newType) {
         TypeInfo oldTypeInfo = typeInfo(oldType);
         TypeInfo newTypeInfo = typeInfo(newType);
 
@@ -809,7 +768,7 @@ public class SchemaDiff {
     }
 
 
-    private static String getTypeName(Type type) {
+    static String getTypeName(Type type) {
         if (type == null) {
             return null;
         }
@@ -833,6 +792,7 @@ public class SchemaDiff {
 
 
     // looks for a type called `Query|Mutation|Subscription` and if it exist then assumes it as an operation def
+
     private Optional<OperationTypeDefinition> synthOperationTypeDefinition(Function<Type, Optional<ObjectTypeDefinition>> typeReteriver, String opName) {
         TypeName type = new TypeName(capitalize(opName));
         Optional<ObjectTypeDefinition> typeDef = typeReteriver.apply(type);
@@ -856,5 +816,9 @@ public class SchemaDiff {
         } else {
             return name;
         }
+    }
+
+    private String mkDotName(String... objectNames) {
+        return Arrays.stream(objectNames).collect(Collectors.joining("."));
     }
 }

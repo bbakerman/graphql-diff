@@ -2,10 +2,7 @@ package com.graphql.diff
 
 import com.graphql.diff.reporting.CapturingReporter
 import com.graphql.diff.reporting.ChainedReporter
-import com.graphql.diff.reporting.DifferenceCategory
-import com.graphql.diff.reporting.DifferenceEvent
-import com.graphql.diff.reporting.PrintingReporter
-import com.graphql.diff.reporting.TypeKind
+import com.graphql.diff.reporting.PrintStreamReporter
 import graphql.language.Argument
 import graphql.language.Directive
 import graphql.language.IntValue
@@ -18,9 +15,9 @@ import graphql.language.TypeDefinition
 import graphql.language.TypeName
 import spock.lang.Specification
 
-import static com.graphql.diff.reporting.DifferenceCategory.INVALID
-import static com.graphql.diff.reporting.DifferenceCategory.MISSING
-import static com.graphql.diff.reporting.DifferenceCategory.STRICTER
+import static DiffCategory.INVALID
+import static DiffCategory.MISSING
+import static DiffCategory.STRICTER
 
 class SchemaDiffTest extends Specification {
     private CapturingReporter reporter
@@ -28,7 +25,7 @@ class SchemaDiffTest extends Specification {
 
     void setup() {
         reporter = new CapturingReporter()
-        chainedReporter = new ChainedReporter(reporter, new PrintingReporter())
+        chainedReporter = new ChainedReporter(reporter, new PrintStreamReporter())
     }
 
     DiffSet diffSet(String newFile) {
@@ -79,7 +76,7 @@ class SchemaDiffTest extends Specification {
         noLongerList == INVALID
     }
 
-    DifferenceEvent lastBreakage(CapturingReporter capturingReporter) {
+    DiffEvent lastBreakage(CapturingReporter capturingReporter) {
         def breakages = capturingReporter.getBreakages()
         breakages.size() == 0 ? null : breakages.get(breakages.size() - 1)
     }
@@ -87,7 +84,7 @@ class SchemaDiffTest extends Specification {
     def "directives_controlled_via_options"() {
 
         given:
-        SchemaDiff.Ctx ctx = new SchemaDiff.Ctx(reporter, null, null)
+        DiffCtx ctx = new DiffCtx(reporter, null, null)
 
         TypeDefinition left = new ObjectTypeDefinition("fooType")
 
@@ -111,7 +108,7 @@ class SchemaDiffTest extends Specification {
     def "directives enforced to be the same"() {
 
         given:
-        SchemaDiff.Ctx ctx = new SchemaDiff.Ctx(reporter, null, null)
+        DiffCtx ctx = new DiffCtx(reporter, null, null)
 
         TypeDefinition left = new ObjectTypeDefinition("fooType")
 
@@ -219,7 +216,7 @@ class SchemaDiffTest extends Specification {
         reporter.breakageCount == 1
         reporter.breakages[0].category == MISSING
         reporter.breakages[0].typeKind == TypeKind.Operation
-        reporter.breakages[0].fieldName == 'mutation'
+        reporter.breakages[0].typeName == 'Mutation'
 
     }
 
@@ -366,18 +363,18 @@ class SchemaDiffTest extends Specification {
         reporter.breakageCount == 0
         reporter.dangerCount == 3
 
-        reporter.dangers[0].category == DifferenceCategory.ADDITION
+        reporter.dangers[0].category == DiffCategory.ADDITION
         reporter.dangers[0].typeName == "Character"
         reporter.dangers[0].typeKind == TypeKind.Union
         reporter.dangers[0].components.contains("BenignFigure")
 
-        reporter.dangers[1].category == DifferenceCategory.DIFFERENT
+        reporter.dangers[1].category == DiffCategory.DIFFERENT
         reporter.dangers[1].typeName == "Query"
         reporter.dangers[1].typeKind == TypeKind.Object
         reporter.dangers[1].fieldName == "being"
         reporter.dangers[1].components.contains("type")
 
-        reporter.dangers[2].category == DifferenceCategory.ADDITION
+        reporter.dangers[2].category == DiffCategory.ADDITION
         reporter.dangers[2].typeName == "Temperament"
         reporter.dangers[2].typeKind == TypeKind.Enum
         reporter.dangers[2].components.contains("Nonplussed")

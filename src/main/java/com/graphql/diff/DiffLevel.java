@@ -1,9 +1,12 @@
-package com.graphql.diff.reporting;
+package com.graphql.diff;
+
+import graphql.PublicApi;
 
 /**
  * This is the level of difference
  */
-public enum DifferenceLevel {
+@PublicApi
+public enum DiffLevel {
     /**
      * A simple info object coming out of the difference engine
      */

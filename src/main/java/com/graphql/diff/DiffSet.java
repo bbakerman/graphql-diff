@@ -3,6 +3,7 @@ package com.graphql.diff;
 import graphql.Assert;
 import graphql.ExecutionResult;
 import graphql.GraphQL;
+import graphql.PublicApi;
 import graphql.introspection.IntrospectionQuery;
 import graphql.schema.GraphQLSchema;
 
@@ -10,8 +11,9 @@ import java.util.Map;
 
 /**
  * Represents 2 schemas that can be diffed.  The {@link com.graphql.diff.SchemaDiff} code
- * assumes that that schemas to be diffed are the result of an introspection query
+ * assumes that that schemas to be diffed are the result of an introspection query.
  */
+@PublicApi
 public class DiffSet {
 
     private final Map<String, Object> introspectionOld;
